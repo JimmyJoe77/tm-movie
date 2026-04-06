@@ -5,8 +5,8 @@
             "id": "ophim",
             "name": "OPhim",
             "version": "1.0.0",
-            "scriptUrl": "https://raw.githubusercontent.com/jimmyjoe77/tm-movie/main/plugins/ophim_plugin.js",
-            "iconUrl": "https://raw.githubusercontent.com/jimmyjoe77/tm-movie/main/plugins/ophim.ico"
+            "scriptUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/ophim_plugin.js",
+            "iconUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/ophim.ico"
         }
     ]
 }
