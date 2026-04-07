@@ -14,14 +14,6 @@ function getManifest() {
     isEnabled: true,
     isAdult: false,
     type: 'MOVIE',
-    layoutType: 'VERTICAL',
-    playerType: 'exoplayer',
-    // API Headers - App will inject these headers when calling API
-    apiHeaders: {
-      "Authorization": "Bearer " + TMDB_API_KEY,
-      "accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
   });
 }
 
@@ -210,6 +202,18 @@ function getUrlCategories() {
   return "https://api.themoviedb.org/3/genre/movie/list?language=en-US";
 }
 
+// Helper function to get API headers for requests
+function getApiHeaders() {
+  return {
+    "Authorization": "Bearer " + TMDB_API_KEY,
+    "accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.themoviedb.org/",
+    "Origin": "https://www.themoviedb.org",
+    "Accept-Language": "en-US,en;q=0.9"
+  };
+}
+
 // =============================================================================
 // PARSERS — Group 3: Data Processing (⭐ Most Important)
 // =============================================================================
@@ -359,14 +363,7 @@ function parseDetailResponse(html) {
   // In practice, app will need to integrate with other streaming providers
   try {
     var streamUrl = "";
-    var headers = {
-      "Authorization": "Bearer " + TMDB_API_KEY,
-      "accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://www.themoviedb.org/",
-      "Origin": "https://www.themoviedb.org",
-      "Accept-Language": "en-US,en;q=0.9"
-    };
+    var headers = getApiHeaders();
     
     // Try to parse JSON response
     try {
@@ -392,10 +389,7 @@ function parseDetailResponse(html) {
   } catch (e) {
     return JSON.stringify({
       url: "",
-      headers: {
-        "Authorization": "Bearer " + TMDB_API_KEY,
-        "User-Agent": "Mozilla/5.0"
-      },
+      headers: getApiHeaders(),
       isEmbed: false
     });
   }
