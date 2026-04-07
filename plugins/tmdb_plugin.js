@@ -1,7 +1,9 @@
 // =============================================================================
-// API CONFIGURATION - TMDB API Key v3
+// API CONFIGURATION - TMDB API Key v3 + French-Stream Source
 // =============================================================================
 var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
+var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
+var DEBUG = false;
 
 function getManifest() {
   return JSON.stringify({
@@ -194,18 +196,30 @@ function getUrlSearch(keyword, filtersJson) {
 }
 
 function getUrlDetail(slug) {
-  // slug here is now movie TITLE (from episode.id in parseMovieDetail)
-  // We search Ophim API by title to find the movie, then fetch its detail
+  // slug: movie title from episode.id in parseMovieDetail
+  // Extract year if available (format: "Title(2024)")
+  var year = 0;
+  var titleOnly = slug;
   
-  // Check if slug contains ophim detail indicator (:/)
-  if (slug.indexOf("ophim:") === 0) {
-    // This is already an Ophim slug - fetch detail directly
-    var ophimSlug = slug.substring(6);
-    return "https://ophim1.com/v1/api/phim/" + ophimSlug;
+  var yearMatch = slug.match(/\((\d{4})\)/);
+  if (yearMatch) {
+    year = parseInt(yearMatch[1], 10);
+    titleOnly = slug.replace(/\s*\(\d{4}\)\s*$/, "");
   }
   
-  // Otherwise, treat as movie title - search Ophim
-  return "https://ophim1.com/v1/api/tim-kiem?keyword=" + encodeURIComponent(slug);
+  // Prepare search query: lowercase, URL encode, replace %20 with +
+  var searchQuery = titleOnly.toLowerCase();
+  searchQuery = encodeURIComponent(searchQuery);
+  searchQuery = searchQuery.replace(/%20/g, "+");
+  
+  // Build French-Stream search URL
+  var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
+  
+  if (DEBUG) {
+    // In real implementation, would log to console
+  }
+  
+  return searchUrl;
 }
 
 function getUrlCategories() {
@@ -400,89 +414,142 @@ function parseMovieDetail(apiResponseJson) {
 }
 
 function parseDetailResponse(html) {
-  // This function handles:
-  // 1. Ophim search response (GET /tim-kiem) - extract slug from first result
-  // 2. Ophim detail response (GET /phim/{slug}) - extract video link
+  // Receives HTML from french-stream.one search page
+  // Parse HTML to find matching movie and return its detail link
   try {
-    var response = JSON.parse(html);
+    // Extract all .short elements (movie items)
+    // Pattern: <div class="short">...<a class="short-poster" href="...">...</a>...<p class="short-title">Title</p>...</div>
+    var shortPattern = /<div\s+class="short"[^>]*>([\s\S]*?)<\/div>/g;
+    var shortMatches;
+    var items = [];
     
-    // Case 1: Search response from Ophim - contains array of movies
-    if (response.data && response.data.items && response.data.items.length > 0) {
-      // Found movie in Ophim - now fetch its detail page to get video links
-      var firstMovie = response.data.items[0];
-      var ophimSlug = firstMovie.slug;
+    while ((shortMatches = shortPattern.exec(html)) !== null) {
+      var shortHtml = shortMatches[1];
       
-      // Return detail URL with isEmbed: true to fetch again and parse
-      return JSON.stringify({
-        url: "https://ophim1.com/v1/api/phim/" + ophimSlug,
-        isEmbed: true,  // Tell app to fetch this URL and call parseEmbedResponse()
-        headers: { "Referer": "https://ophim1.com" }
-      });
-    }
-    
-    // Case 2: Detail response from Ophim - contains movie with episodes
-    if (response.movie || response.data) {
-      var movie = response.movie || response.data.item || {};
-      var episodes = response.episodes || response.data.item.episodes || [];
+      // Extract href from .short-poster
+      var hrefMatch = shortHtml.match(/class="short-poster"[^>]*href="([^"]+)"/);
+      if (!hrefMatch) continue;
+      var href = hrefMatch[1];
       
-      // Extract first video link from first server
-      var streamUrl = "";
-      if (episodes.length > 0) {
-        var firstServer = episodes[0];
-        if (firstServer.server_data && firstServer.server_data.length > 0) {
-          streamUrl = firstServer.server_data[0].link_m3u8 || firstServer.server_data[0].link_embed || "";
-        }
+      // Extract title from .short-title
+      var titleMatch = shortHtml.match(/class="short-title"[^>]*>\s*<a[^>]*>([^<]+)<\/a>/);
+      if (!titleMatch) {
+        titleMatch = shortHtml.match(/class="short-title"[^>]*>([^<]+)</);
       }
+      if (!titleMatch) continue;
+      var title = titleMatch[1].trim();
       
-      return JSON.stringify({
-        url: streamUrl,
-        headers: { "Referer": "https://ophim1.com", "User-Agent": "Mozilla/5.0" },
-        subtitles: [],
-        isEmbed: false,  // Final stream URL
-        mimeType: streamUrl.indexOf(".m3u8") !== -1 ? "application/x-mpegURL" : ""
+      items.push({
+        href: href,
+        title: title
       });
     }
     
-    // No data found
+    if (DEBUG) {
+      // Log search results count
+    }
+    
+    // If we found items, return first one with isEmbed: true to fetch its detail
+    if (items.length > 0) {
+      var firstItem = items[0];
+      return JSON.stringify({
+        url: firstItem.href,
+        isEmbed: true,  // Fetch this URL and parse with parseEmbedResponse
+        headers: { "Referer": FRENCH_STREAM_DOMAIN }
+      });
+    }
+    
+    // No items found
     return JSON.stringify({
       url: "",
-      headers: { "Referer": "https://ophim1.com" },
+      headers: { "Referer": FRENCH_STREAM_DOMAIN },
       isEmbed: false
     });
   } catch (e) {
+    if (DEBUG) {
+      // Log error
+    }
     return JSON.stringify({
       url: "",
-      headers: { "Referer": "https://ophim1.com" },
+      headers: { "Referer": FRENCH_STREAM_DOMAIN },
       isEmbed: false
     });
   }
 }
 
 function parseEmbedResponse(html, sourceUrl) {
-  // This is called when parseDetailResponse() returns isEmbed: true
-  // We receive Ophim detail page response and extract the actual video link
+  // Receives HTML from french-stream.one movie detail page
+  // Extract video stream link from page
   try {
-    var response = JSON.parse(html);
-    var movie = response.movie || response.data.item || {};
-    var episodes = response.episodes || response.data.item.episodes || [];
-    
-    // Extract first video link
-    var streamUrl = "";
-    if (episodes.length > 0) {
-      var firstServer = episodes[0];
-      if (firstServer.server_data && firstServer.server_data.length > 0) {
-        streamUrl = firstServer.server_data[0].link_m3u8 || firstServer.server_data[0].link_embed || "";
+    // Try to extract iframe src
+    var iframeMatch = html.match(/\<iframe[^>]*src=["']([^"']+)["'][^>]*\>/);
+    if (iframeMatch && iframeMatch[1]) {
+      var iframeUrl = iframeMatch[1];
+      
+      // If iframe points to another player, we need to fetch it
+      // For now, return it with isEmbed: true to fetch again
+      if (iframeUrl.indexOf(sourceUrl) === -1) {
+        return JSON.stringify({
+          url: iframeUrl,
+          isEmbed: true,
+          headers: { "Referer": sourceUrl }
+        });
       }
     }
     
+    // Try to extract video source URL patterns
+    // Pattern 1: <source src="...m3u8" type="application/x-mpegURL">
+    var sourceMatch = html.match(/\<source[^>]*src=["']([^"']+\.m3u8[^"']*)/);
+    if (sourceMatch && sourceMatch[1]) {
+      return JSON.stringify({
+        url: sourceMatch[1],
+        headers: { "Referer": sourceUrl },
+        isEmbed: false,
+        mimeType: "application/x-mpegURL"
+      });
+    }
+    
+    // Pattern 2: Direct video URL in various formats
+    var videoMatch = html.match(/["']((https?:\/\/)?[^"']*\.(mp4|m3u8|mkv|webm)[^"']*)["\']/i);
+    if (videoMatch && videoMatch[1]) {
+      var videoUrl = videoMatch[1];
+      var isHls = videoUrl.indexOf(".m3u8") !== -1;
+      
+      return JSON.stringify({
+        url: videoUrl,
+        headers: { "Referer": sourceUrl, "User-Agent": "Mozilla/5.0" },
+        isEmbed: false,
+        mimeType: isHls ? "application/x-mpegURL" : ""
+      });
+    }
+    
+    // Pattern 3: JavaScript embedded player data
+    var playerMatch = html.match(/file\s*:\s*["']([^"']+)["']/i);
+    if (playerMatch && playerMatch[1]) {
+      var playerUrl = playerMatch[1];
+      var isHls2 = playerUrl.indexOf(".m3u8") !== -1;
+      
+      return JSON.stringify({
+        url: playerUrl,
+        headers: { "Referer": sourceUrl },
+        isEmbed: false,
+        mimeType: isHls2 ? "application/x-mpegURL" : ""
+      });
+    }
+    
+    if (DEBUG) {
+      // Log: no video found
+    }
+    
     return JSON.stringify({
-      url: streamUrl,
-      headers: { "Referer": "https://ophim1.com", "User-Agent": "Mozilla/5.0" },
-      subtitles: [],
-      isEmbed: false,  // Final stream link
-      mimeType: streamUrl.indexOf(".m3u8") !== -1 ? "application/x-mpegURL" : ""
+      url: "",
+      headers: { "Referer": sourceUrl },
+      isEmbed: false
     });
   } catch (e) {
+    if (DEBUG) {
+      // Log error
+    }
     return JSON.stringify({
       url: "",
       isEmbed: false
