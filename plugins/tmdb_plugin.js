@@ -1,8 +1,8 @@
 
 // =============================================================================
-// API CONFIGURATION - TMDB API Token
+// API CONFIGURATION - TMDB API Key v3
 // =============================================================================
-var TMDB_API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI1ZTUxNWNhYWRmOGQ1MmE2NjVjZjIzMGUzNjc2ZWU2MyIsIm5iZiI6MTczNTI1NjAyNS40NDUsInN1YiI6IjY3NmRlN2Q5Y2ZlNjI2NDRkZjEyYTVkNSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.TmR-s_6o4Y0Gw4pv9g9zwm1iS0des2Pbpgom-pkWvh8";
+var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
 
 function getManifest() {
   return JSON.stringify({
@@ -131,7 +131,8 @@ function getUrlList(slug, filtersJson) {
     var sortBy = filters.sort || "popularity.desc";
     
     var url = "https://api.themoviedb.org/3/discover/movie";
-    url += "?page=" + page;
+    url += "?api_key=" + TMDB_API_KEY;
+    url += "&page=" + page;
     url += "&language=" + language;
     url += "&sort_by=" + sortBy;
     url += "&include_adult=false";
@@ -159,7 +160,7 @@ function getUrlList(slug, filtersJson) {
     
     return url;
   } catch (e) {
-    return "https://api.themoviedb.org/3/discover/movie?page=1&sort_by=popularity.desc";
+    return "https://api.themoviedb.org/3/discover/movie?api_key=" + TMDB_API_KEY + "&page=1&sort_by=popularity.desc";
   }
 }
 
@@ -170,14 +171,15 @@ function getUrlSearch(keyword, filtersJson) {
     var language = filters.language || "en-US";
     
     var url = "https://api.themoviedb.org/3/search/movie";
-    url += "?query=" + encodeURIComponent(keyword);
+    url += "?api_key=" + TMDB_API_KEY;
+    url += "&query=" + encodeURIComponent(keyword);
     url += "&page=" + page;
     url += "&language=" + language;
     url += "&include_adult=false";
     
     return url;
   } catch (e) {
-    return "https://api.themoviedb.org/3/search/movie?query=" + encodeURIComponent(keyword);
+    return "https://api.themoviedb.org/3/search/movie?api_key=" + TMDB_API_KEY + "&query=" + encodeURIComponent(keyword);
   }
 }
 
@@ -187,29 +189,28 @@ function getUrlDetail(slug) {
   if (slug.indexOf("?") !== -1) {
     // This is a discover URL, not a movie detail URL
     // Return base list URL, not detail
-    return "https://api.themoviedb.org/3/discover/movie" + (slug.indexOf("?") !== -1 ? slug.substring(slug.indexOf("?")) : "");
+    return "https://api.themoviedb.org/3/discover/movie?api_key=" + TMDB_API_KEY + (slug.indexOf("?") !== -1 ? slug.substring(slug.indexOf("?")) : "");
   }
   
   // slug is movie ID
   var url = "https://api.themoviedb.org/3/movie/" + slug;
-  url += "?language=en-US";
+  url += "?api_key=" + TMDB_API_KEY;
+  url += "&language=en-US";
   url += "&append_to_response=credits,videos,external_ids";
   
   return url;
 }
 
 function getUrlCategories() {
-  return "https://api.themoviedb.org/3/genre/movie/list?language=en-US";
+  return "https://api.themoviedb.org/3/genre/movie/list?api_key=" + TMDB_API_KEY + "&language=en-US";
 }
 
 // Helper function to get API headers for requests
 function getApiHeaders() {
   return {
-    "Authorization": "Bearer " + TMDB_API_KEY,
     "accept": "application/json",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.themoviedb.org/",
-    "Origin": "https://www.themoviedb.org",
     "Accept-Language": "en-US,en;q=0.9"
   };
 }
