@@ -3,7 +3,7 @@
 // =============================================================================
 var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
 var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
-var DEBUG = false;
+var DEBUG = true;  // Set to true for debugging
 
 function getManifest() {
   return JSON.stringify({
@@ -196,30 +196,61 @@ function getUrlSearch(keyword, filtersJson) {
 }
 
 function getUrlDetail(slug) {
-  // slug: movie title from episode.id in parseMovieDetail
-  // Extract year if available (format: "Title(2024)")
-  var year = 0;
-  var titleOnly = slug;
+  // slug can be:
+  // 1. movie ID (numeric string) - when user clicks from list → fetch TMDB detail
+  // 2. movie title (string) - when user clicks Play → search on french-stream
   
-  var yearMatch = slug.match(/\((\d{4})\)/);
-  if (yearMatch) {
-    year = parseInt(yearMatch[1], 10);
-    titleOnly = slug.replace(/\s*\(\d{4}\)\s*$/, "");
+  try {
+    // Check if slug is a numeric ID
+    if (/^\d+$/.test(slug)) {
+      // Case 1: This is a TMDB movie ID - fetch movie detail from TMDB
+      if (DEBUG) {
+        // Log: Fetching TMDB detail for movie ID: slug
+      }
+      
+      var url = "https://api.themoviedb.org/3/movie/" + slug;
+      url += "?api_key=" + TMDB_API_KEY;
+      url += "&language=en-US";
+      url += "&append_to_response=credits,videos,external_ids";
+      
+      return url;
+    }
+    
+    // Case 2: This is a movie TITLE - search on french-stream
+    if (DEBUG) {
+      // Log: Searching french-stream for title: slug
+    }
+    
+    // Extract year if present (format: "Title(2024)")
+    var year = 0;
+    var titleOnly = slug;
+    
+    var yearMatch = slug.match(/\((\d{4})\)/);
+    if (yearMatch) {
+      year = parseInt(yearMatch[1], 10);
+      titleOnly = slug.replace(/\s*\(\d{4}\)\s*$/, "");
+    }
+    
+    // Prepare search query: lowercase, URL encode, replace %20 with +
+    var searchQuery = titleOnly.toLowerCase();
+    searchQuery = encodeURIComponent(searchQuery);
+    searchQuery = searchQuery.replace(/%20/g, "+");
+    
+    // Build French-Stream search URL
+    var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
+    
+    if (DEBUG) {
+      // Log: French-Stream search URL: searchUrl
+    }
+    
+    return searchUrl;
+  } catch (e) {
+    if (DEBUG) {
+      // Log: Error in getUrlDetail: e.toString()
+    }
+    // Fallback: return TMDB discover
+    return "https://api.themoviedb.org/3/discover/movie?api_key=" + TMDB_API_KEY + "&page=1";
   }
-  
-  // Prepare search query: lowercase, URL encode, replace %20 with +
-  var searchQuery = titleOnly.toLowerCase();
-  searchQuery = encodeURIComponent(searchQuery);
-  searchQuery = searchQuery.replace(/%20/g, "+");
-  
-  // Build French-Stream search URL
-  var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
-  
-  if (DEBUG) {
-    // In real implementation, would log to console
-  }
-  
-  return searchUrl;
 }
 
 function getUrlCategories() {
@@ -304,6 +335,11 @@ function parseMovieDetail(apiResponseJson) {
   try {
     var movie = JSON.parse(apiResponseJson);
 
+    if (DEBUG) {
+      // Log: Parsing movie detail for: movie.title
+      // Log: Movie ID: movie.id
+    }
+
     // Extract cast info
     var casts = "";
     if (movie.credits && movie.credits.cast) {
@@ -352,19 +388,28 @@ function parseMovieDetail(apiResponseJson) {
       }
     }
 
-    // TMDB does not provide direct stream links
-    // Episodes are fake list from episode IDs to trigger app calling getUrlDetail
+    // Build episode title with year for better matching
+    var releaseYear = 0;
+    if (movie.release_date) {
+      releaseYear = parseInt(movie.release_date.substring(0, 4), 10);
+    }
+    
+    var episodeId = movie.title;  // Default
+    if (releaseYear > 0) {
+      episodeId = movie.title + "(" + releaseYear + ")";  // Add year for search
+    }
+
     var episodes = [];
     var servers = [];
 
-    // Create fake episodes with movie TITLE to trigger search on Ophim
-    // episode.id will be passed to getUrlDetail() as the search keyword
-    if (movie.title) {
+    // Create server with episode to trigger play action
+    // episode.id will be passed to getUrlDetail() as the movie title for search
+    if (movie.id) {
       servers.push({
         name: "Watch Now",
         episodes: [
           {
-            id: movie.title || "Unknown",  // Movie title as search keyword
+            id: episodeId,  // This will be the search query
             name: "Play Movie",
             slug: "stream",
           },
@@ -372,10 +417,9 @@ function parseMovieDetail(apiResponseJson) {
       });
     }
 
-    var releaseYear = parseInt(
-      movie.release_date ? movie.release_date.substring(0, 4) : 0,
-      10,
-    );
+    if (DEBUG) {
+      // Log: Created episode ID: episodeId
+    }
 
     return JSON.stringify({
       id: String(movie.id),
@@ -403,12 +447,16 @@ function parseMovieDetail(apiResponseJson) {
       videos: videos,
     });
   } catch (e) {
+    if (DEBUG) {
+      // Log: Error parsing movie detail: e.toString()
+    }
     return JSON.stringify({
       id: "",
-      title: "Error",
+      title: "Error parsing movie",
       posterUrl: "",
       servers: [],
       rating: 0,
+      error: true,
     });
   }
 }
