@@ -194,25 +194,18 @@ function getUrlSearch(keyword, filtersJson) {
 }
 
 function getUrlDetail(slug) {
-  // slug can be movie ID (number) or URL from home sections
-  // If slug contains "?", it's a discover URL — need to extract movie ID
-  if (slug.indexOf("?") !== -1) {
-    // This is a discover URL, not a movie detail URL
-    // Return base list URL, not detail
-    return (
-      "https://api.themoviedb.org/3/discover/movie?api_key=" +
-      TMDB_API_KEY +
-      (slug.indexOf("?") !== -1 ? slug.substring(slug.indexOf("?")) : "")
-    );
+  // slug here is now movie TITLE (from episode.id in parseMovieDetail)
+  // We search Ophim API by title to find the movie, then fetch its detail
+  
+  // Check if slug contains ophim detail indicator (:/)
+  if (slug.indexOf("ophim:") === 0) {
+    // This is already an Ophim slug - fetch detail directly
+    var ophimSlug = slug.substring(6);
+    return "https://ophim1.com/v1/api/phim/" + ophimSlug;
   }
-
-  // slug is movie ID
-  var url = "https://api.themoviedb.org/3/movie/" + slug;
-  url += "?api_key=" + TMDB_API_KEY;
-  url += "&language=en-US";
-  url += "&append_to_response=credits,videos,external_ids";
-
-  return url;
+  
+  // Otherwise, treat as movie title - search Ophim
+  return "https://ophim1.com/v1/api/tim-kiem?keyword=" + encodeURIComponent(slug);
 }
 
 function getUrlCategories() {
@@ -350,15 +343,14 @@ function parseMovieDetail(apiResponseJson) {
     var episodes = [];
     var servers = [];
 
-    // Create fake episodes to trigger app calling getUrlDetail() with movie ID
-    // In TMDB, there are no episodes for movies, only for TV series
-    // So we will create 1 "server" with 1 "episode" as movie ID to trigger getUrlDetail
-    if (movie.id) {
+    // Create fake episodes with movie TITLE to trigger search on Ophim
+    // episode.id will be passed to getUrlDetail() as the search keyword
+    if (movie.title) {
       servers.push({
-        name: "TMDB Stream",
+        name: "Watch Now",
         episodes: [
           {
-            id: String(movie.id),
+            id: movie.title || "Unknown",  // Movie title as search keyword
             name: "Play Movie",
             slug: "stream",
           },
@@ -408,49 +400,94 @@ function parseMovieDetail(apiResponseJson) {
 }
 
 function parseDetailResponse(html) {
-  // TMDB API does not provide stream links (only metadata)
-  // In practice, app will need to integrate with other streaming providers
+  // This function handles:
+  // 1. Ophim search response (GET /tim-kiem) - extract slug from first result
+  // 2. Ophim detail response (GET /phim/{slug}) - extract video link
   try {
-    var streamUrl = "";
-    var headers = getApiHeaders();
-
-    // Try to parse JSON response
-    try {
-      var json = JSON.parse(html);
-
-      // If it's an API error
-      if (json.status_code && json.status_code !== 1) {
-        streamUrl = "";
-      }
-    } catch (parseErr) {
-      // If not JSON, try extracting from HTML string
-      streamUrl = "";
+    var response = JSON.parse(html);
+    
+    // Case 1: Search response from Ophim - contains array of movies
+    if (response.data && response.data.items && response.data.items.length > 0) {
+      // Found movie in Ophim - now fetch its detail page to get video links
+      var firstMovie = response.data.items[0];
+      var ophimSlug = firstMovie.slug;
+      
+      // Return detail URL with isEmbed: true to fetch again and parse
+      return JSON.stringify({
+        url: "https://ophim1.com/v1/api/phim/" + ophimSlug,
+        isEmbed: true,  // Tell app to fetch this URL and call parseEmbedResponse()
+        headers: { "Referer": "https://ophim1.com" }
+      });
     }
-
-    // TMDB does not provide direct stream links
-    // Return structure for app to know
+    
+    // Case 2: Detail response from Ophim - contains movie with episodes
+    if (response.movie || response.data) {
+      var movie = response.movie || response.data.item || {};
+      var episodes = response.episodes || response.data.item.episodes || [];
+      
+      // Extract first video link from first server
+      var streamUrl = "";
+      if (episodes.length > 0) {
+        var firstServer = episodes[0];
+        if (firstServer.server_data && firstServer.server_data.length > 0) {
+          streamUrl = firstServer.server_data[0].link_m3u8 || firstServer.server_data[0].link_embed || "";
+        }
+      }
+      
+      return JSON.stringify({
+        url: streamUrl,
+        headers: { "Referer": "https://ophim1.com", "User-Agent": "Mozilla/5.0" },
+        subtitles: [],
+        isEmbed: false,  // Final stream URL
+        mimeType: streamUrl.indexOf(".m3u8") !== -1 ? "application/x-mpegURL" : ""
+      });
+    }
+    
+    // No data found
     return JSON.stringify({
-      url: streamUrl,
-      headers: headers,
-      subtitles: [],
-      isEmbed: false,
+      url: "",
+      headers: { "Referer": "https://ophim1.com" },
+      isEmbed: false
     });
   } catch (e) {
     return JSON.stringify({
       url: "",
-      headers: getApiHeaders(),
-      isEmbed: false,
+      headers: { "Referer": "https://ophim1.com" },
+      isEmbed: false
     });
   }
 }
 
 function parseEmbedResponse(html, sourceUrl) {
-  // Optional: TMDB does not use embed responses
-  // If needed, implement logic to extract embed player
-  return JSON.stringify({
-    url: "",
-    isEmbed: false,
-  });
+  // This is called when parseDetailResponse() returns isEmbed: true
+  // We receive Ophim detail page response and extract the actual video link
+  try {
+    var response = JSON.parse(html);
+    var movie = response.movie || response.data.item || {};
+    var episodes = response.episodes || response.data.item.episodes || [];
+    
+    // Extract first video link
+    var streamUrl = "";
+    if (episodes.length > 0) {
+      var firstServer = episodes[0];
+      if (firstServer.server_data && firstServer.server_data.length > 0) {
+        streamUrl = firstServer.server_data[0].link_m3u8 || firstServer.server_data[0].link_embed || "";
+      }
+    }
+    
+    return JSON.stringify({
+      url: streamUrl,
+      headers: { "Referer": "https://ophim1.com", "User-Agent": "Mozilla/5.0" },
+      subtitles: [],
+      isEmbed: false,  // Final stream link
+      mimeType: streamUrl.indexOf(".m3u8") !== -1 ? "application/x-mpegURL" : ""
+    });
+  } catch (e) {
+    return JSON.stringify({
+      url: "",
+      isEmbed: false
+    });
+  }
 }
 
 function parseCategoriesResponse(apiResponseJson) {
