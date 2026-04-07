@@ -129,7 +129,8 @@ function getUrlList(slug, filtersJson) {
     var page = filters.page || 1;
     
     var url = "https://api.themoviedb.org/3/" + slug;
-    url += "?api_key=" + TMDB_API_KEY;
+    var separator = slug.indexOf("?") !== -1 ? "&" : "?";
+    url += separator + "api_key=" + TMDB_API_KEY;
     url += "&page=" + page;
     
     // Apply genre filter if slug is a genre ID
