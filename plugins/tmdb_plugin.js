@@ -526,9 +526,28 @@ function parseDetailResponse(html) {
 }
 
 function parseEmbedResponse(html, sourceUrl) {
-  // Receives HTML from french-stream.one movie detail page
+  // Receives HTML from various video hosting pages
   // Extract video stream link from page
   try {
+    // Pattern 0: Vidzy.live HLS master playlist (priority)
+    // Looks for: https://u14.vidzy.live/hls2/.../master.m3u8?...
+    var vidzyMatch = html.match(/(https:\/\/u\d+\.vidzy\.live\/hls2\/[^"'\s]+master\.m3u8[^"'\s]*)/);
+    if (vidzyMatch && vidzyMatch[1]) {
+      if (DEBUG) {
+        // Log: Found Vidzy HLS URL
+      }
+      return JSON.stringify({
+        url: vidzyMatch[1],
+        headers: { 
+          "Referer": sourceUrl,
+          "Origin": "https://vidzy.live",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
+        isEmbed: false,
+        mimeType: "application/x-mpegURL"
+      });
+    }
+    
     // Try to extract iframe src
     var iframeMatch = html.match(/\<iframe[^>]*src=["']([^"']+)["'][^>]*\>/);
     if (iframeMatch && iframeMatch[1]) {
@@ -537,6 +556,9 @@ function parseEmbedResponse(html, sourceUrl) {
       // If iframe points to another player, we need to fetch it
       // For now, return it with isEmbed: true to fetch again
       if (iframeUrl.indexOf(sourceUrl) === -1) {
+        if (DEBUG) {
+          // Log: Found iframe URL
+        }
         return JSON.stringify({
           url: iframeUrl,
           isEmbed: true,
@@ -549,6 +571,9 @@ function parseEmbedResponse(html, sourceUrl) {
     // Pattern 1: <source src="...m3u8" type="application/x-mpegURL">
     var sourceMatch = html.match(/\<source[^>]*src=["']([^"']+\.m3u8[^"']*)/);
     if (sourceMatch && sourceMatch[1]) {
+      if (DEBUG) {
+        // Log: Found source tag m3u8
+      }
       return JSON.stringify({
         url: sourceMatch[1],
         headers: { "Referer": sourceUrl },
@@ -563,6 +588,9 @@ function parseEmbedResponse(html, sourceUrl) {
       var videoUrl = videoMatch[1];
       var isHls = videoUrl.indexOf(".m3u8") !== -1;
       
+      if (DEBUG) {
+        // Log: Found direct video URL
+      }
       return JSON.stringify({
         url: videoUrl,
         headers: { "Referer": sourceUrl, "User-Agent": "Mozilla/5.0" },
@@ -577,6 +605,9 @@ function parseEmbedResponse(html, sourceUrl) {
       var playerUrl = playerMatch[1];
       var isHls2 = playerUrl.indexOf(".m3u8") !== -1;
       
+      if (DEBUG) {
+        // Log: Found player file URL
+      }
       return JSON.stringify({
         url: playerUrl,
         headers: { "Referer": sourceUrl },
