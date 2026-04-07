@@ -7,6 +7,13 @@
             "version": "1.0.0",
             "scriptUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/ophim_plugin.js",
             "iconUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/ophim.ico"
+        },
+        {
+            "id": "tmdb",
+            "name": "TMDB",
+            "version": "1.0.0",
+            "scriptUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/tmdb_plugin.js",
+            "iconUrl": "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/tmdb.ico"
         }
     ]
 }
