@@ -30,12 +30,6 @@ function getHomeSections() {
       path: "",
     },
     {
-      slug: "tv/popular",
-      title: "TV Shows Popular",
-      type: "Horizontal",
-      path: "",
-    },
-    {
       slug: "movie/top_rated",
       title: "Top Rated Movies",
       type: "Horizontal",
