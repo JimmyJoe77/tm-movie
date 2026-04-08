@@ -1,880 +1,758 @@
 // =============================================================================
-// API CONFIGURATION - TMDB API Key v3 + French-Stream Source
+// TMDB Plugin cho nền tảng VAAPP - Cập nhật lõi cào link Vidsrc Mạng VIP (Không giật lag)
+// Trích xuất trực tiếp M3U8 Stream 100% bằng Javascript (Không cần WebView/Captcha)
 // =============================================================================
+
 var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
+var BASE_URL = "https://api.themoviedb.org/3";
+var IMG_BASE_URL = "https://image.tmdb.org/t/p/w500";
+// Chuyển sang tiếng anh để tên phim chuẩn khớp với data Vidsrc
+var LANG = "en-US"; 
+
+var VIDSRC_DOMAIN = "https://vidsrc.net";
 var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
-var DEBUG = true;  // Set to true for debugging
-var LAST_SEARCH_TITLE = "";  // Track original title for matching in parseDetailResponse (CALL 2)
-var LAST_MEDIA_TYPE = "movie";  // Track media type (movie or tv) for detail fetching
+var FRENCH_STREAM_COOKIE = "";
+var FRENCH_STREAM_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+var DEBUG = false;
+
+function debugLog() {
+    if (!DEBUG || typeof console === "undefined" || !console.log) return;
+    try {
+        console.log.apply(console, arguments);
+    } catch (e) {}
+}
 
 function getManifest() {
-  return JSON.stringify({
-    id: "tmdb",
-    name: "TMDB",
-    version: "1.0.0",
-    baseUrl: "https://api.themoviedb.org/3/",
-    iconUrl:
-      "https://raw.githubusercontent.com/JimmyJoe77/tm-movie/main/plugins/tmdb.ico",
-    isEnabled: true,
-    isAdult: false,
-    type: "MOVIE",
-  });
+    return JSON.stringify({
+        "id": "tmdb_xpass",
+        "name": "Phim TMDB Cao Cấp",
+        "version": "1.4.0",
+        "baseUrl": BASE_URL,
+        "type": "video",
+        "author": "Antigravity",
+        "description": "Nguồn phim quốc tế TMDB, hỗ trợ Xpass + FrenchStream và trích xuất M3U8 trực tiếp"
+    });
 }
 
 function getHomeSections() {
-  return JSON.stringify([
-    {
-      slug: "movie/popular",
-      title: "Movies Popular",
-      type: "Horizontal",
-      path: "",
-    },
-    {
-      slug: "movie/top_rated",
-      title: "Top Rated Movies",
-      type: "Horizontal",
-      path: "",
-    },
-    {
-      slug: "movie/upcoming",
-      title: "Upcoming Movies",
-      type: "Horizontal",
-      path: "",
-    },
-    {
-      slug: "discover/movie?with_genres=16",
-      title: "Animation",
-      type: "Horizontal",
-      path: "",
-    },
-    {
-      slug: "discover/movie?with_genres=28",
-      title: "Action",
-      type: "Horizontal",
-      path: "",
-    },
-    {
-      slug: "discover/movie",
-      title: "Movies you may like",
-      type: "Grid",
-      path: "",
-    },
-  ]);
+    return JSON.stringify([
+        { slug: "movie_popular", title: "Phim Lẻ Phổ Biến" },
+        { slug: "tv_popular", title: "Phim Bộ Phổ Biến" },
+        { slug: "movie_now_playing", title: "Phim Lẻ Đang Chiếu" },
+        { slug: "tv_on_the_air", title: "Phim Bộ Đang Chiếu" },
+        { slug: "movie_top_rated", title: "Top Phim Lẻ" },
+        { slug: "tv_top_rated", title: "Top Phim Bộ" }
+    ]);
 }
-
-function getPrimaryCategories() {
-  return JSON.stringify([
-    { id: "28", slug: "Action" },
-    { id: "12", slug: "Adventure" },
-    { id: "16", slug: "Animation" },
-    { id: "35", slug: "Comedy" },
-    { id: "80", slug: "Crime" },
-    { id: "99", slug: "Documentary" },
-    { id: "18", slug: "Drama" },
-    { id: "10751", slug: "Family" },
-    { id: "14", slug: "Fantasy" },
-    { id: "36", slug: "History" },
-    { id: "27", slug: "Horror" },
-    { id: "10402", slug: "Music" },
-    { id: "9648", slug: "Mystery" },
-    { id: "10749", slug: "Romance" },
-    { id: "878", slug: "Science Fiction" },
-    { id: "10770", slug: "TV Movie" },
-    { id: "53", slug: "Thriller" },
-    { id: "10752", slug: "War" },
-    { id: "37", slug: "Western" },
-  ]);
-}
-
-function getFilterConfig() {
-  return JSON.stringify({
-    sortBy: [
-      { id: "popularity.desc", name: "Popularity Descending" },
-      { id: "popularity.asc", name: "Popularity Ascending" },
-      { id: "revenue.desc", name: "Revenue Descending" },
-      { id: "revenue.asc", name: "Revenue Ascending" },
-      { id: "primary_release_date.desc", name: "Release Date Newest" },
-      { id: "primary_release_date.asc", name: "Release Date Oldest" },
-      { id: "vote_average.desc", name: "Rating Highest" },
-      { id: "vote_average.asc", name: "Rating Lowest" },
-      { id: "vote_count.desc", name: "Vote Count Descending" },
-      { id: "vote_count.asc", name: "Vote Count Ascending" },
-      { id: "original_title.asc", name: "Title (A-Z)" },
-      { id: "original_title.desc", name: "Title (Z-A)" },
-    ],
-    releaseYear: [
-      { id: 2024, name: "2024" },
-      { id: 2023, name: "2023" },
-      { id: 2022, name: "2022" },
-      { id: 2021, name: "2021" },
-      { id: 2020, name: "2020" },
-      { id: 2019, name: "2019" },
-      { id: 2018, name: "2018" },
-      { id: 2017, name: "2017" },
-      { id: 2016, name: "2016" },
-      { id: 2015, name: "2015" },
-    ],
-    voteAverage: [
-      { id: "8", name: "8.0+" },
-      { id: "7", name: "7.0+" },
-      { id: "6", name: "6.0+" },
-      { id: "5", name: "5.0+" },
-    ],
-  });
-}
-
-// =============================================================================
-// URL GENERATION — Group 2: Generate URLs
-// =============================================================================
 
 function getUrlList(slug, filtersJson) {
-  try {
-    var filters = JSON.parse(filtersJson || "{}");
-    var page = filters.page || 1;
+    var page = JSON.parse(filtersJson || "{}").page || 1;
+    var url = "";
 
-    var url = "https://api.themoviedb.org/3/" + slug;
-    var separator = slug.indexOf("?") !== -1 ? "&" : "?";
-    url += separator + "api_key=" + TMDB_API_KEY;
-    url += "&page=" + page;
-
-    // Apply genre filter if slug is a genre ID
-    if (slug && slug.match(/^\d+$/)) {
-      url += "&with_genres=" + slug;
-    }
-
-    // Apply release year filter
-    if (filters.year) {
-      url += "&primary_release_year=" + filters.year;
-    }
-
-    // Apply vote average filter
-    if (filters.voteAverage) {
-      url += "&vote_average.gte=" + filters.voteAverage;
-    }
-
-    // Apply rating filter
-    if (filters.rating) {
-      url += "&vote_average.gte=" + filters.rating;
-    }
-
-    return url;
-  } catch (e) {
-    return (
-      "https://api.themoviedb.org/3/discover/movie?api_key=" +
-      TMDB_API_KEY +
-      "&page=1&sort_by=popularity.desc"
-    );
-  }
+    if (slug === "movie_popular") url = "/movie/popular";
+    else if (slug === "tv_popular") url = "/tv/popular";
+    else if (slug === "movie_now_playing") url = "/movie/now_playing";
+    else if (slug === "tv_on_the_air") url = "/tv/on_the_air";
+    else if (slug === "movie_top_rated") url = "/movie/top_rated";
+    else if (slug === "tv_top_rated") url = "/tv/top_rated";
+    
+    if (!url) return "";
+    return BASE_URL + url + buildParams(page);
 }
 
 function getUrlSearch(keyword, filtersJson) {
-  try {
-    var filters = JSON.parse(filtersJson || "{}");
-    var page = filters.page || 1;
-    var language = filters.language || "en-US";
-
-    var url = "https://api.themoviedb.org/3/search/movie";
-    url += "?api_key=" + TMDB_API_KEY;
-    url += "&query=" + encodeURIComponent(keyword);
-    url += "&page=" + page;
-    url += "&language=" + language;
-    url += "&include_adult=false";
-
-    return url;
-  } catch (e) {
-    return (
-      "https://api.themoviedb.org/3/search/movie?api_key=" +
-      TMDB_API_KEY +
-      "&query=" +
-      encodeURIComponent(keyword)
-    );
-  }
+    var page = JSON.parse(filtersJson || "{}").page || 1;
+    return BASE_URL + "/search/multi" + buildParams(page) + "&query=" + encodeURIComponent(keyword);
 }
 
-function getUrlDetail(slug) {
-  // slug can be:
-  // 1. movie/TV ID (numeric string) - when user clicks from list → fetch TMDB detail
-  // 2. movie/TV title (string with type marker) - when user clicks Play → search on french-stream
-  //    Format: "Title(Year)~TYPE" where TYPE is "movie" or "tv"
-  
-  try {
-    // Check if slug is a numeric ID
-    if (/^\d+$/.test(slug)) {
-      // ✅ MODE 1 (CALL 1): TMDB MODE - Fetch movie/TV detail from TMDB
-      if (DEBUG) {
-        // Log: [CALL 1] Fetching TMDB detail for ID: slug (using type: LAST_MEDIA_TYPE)
-      }
-      
-      // Use the media type to call the correct endpoint
-      var mediaType = LAST_MEDIA_TYPE || "movie";
-      var url = "https://api.themoviedb.org/3/" + mediaType + "/" + slug;
-      url += "?api_key=" + TMDB_API_KEY;
-      url += "&language=en-US";
-      url += "&append_to_response=credits";  // Get credits for both movie and TV
-      
-      return url;
-    }
-    
-    // ✅ MODE 2 (CALL 2): SEARCH MODE - Search on french-stream with title
-    if (DEBUG) {
-      // Log: [CALL 2] Searching french-stream for title: slug
-    }
-    
-    // Parse type marker from slug format: "Title(Year)~TYPE"
-    var mediaTypeMarker = "movie";  // Default
-    var titleForSearch = slug;
-    
-    var typeMatch = slug.match(/~(movie|tv)$/);
-    if (typeMatch) {
-      mediaTypeMarker = typeMatch[1];
-      titleForSearch = slug.replace(/~(movie|tv)$/, "");  // Remove type marker
-    }
-    
-    // Extract year if present (format: "Title(2024)")
-    var year = 0;
-    var titleOnly = titleForSearch;
-    
-    var yearMatch = titleForSearch.match(/\((\d{4})\)/);
-    if (yearMatch) {
-      year = parseInt(yearMatch[1], 10);
-      titleOnly = titleForSearch.replace(/\s*\(\d{4}\)\s*$/, "");
-    }
-    
-    // Prepare search query: lowercase, URL encode, replace %20 with +
-    var searchQuery = titleOnly.toLowerCase();
-    searchQuery = encodeURIComponent(searchQuery);
-    searchQuery = searchQuery.replace(/%20/g, "+");
-    
-    // For TV shows, append type hint to search
-    if (mediaTypeMarker === "tv") {
-      searchQuery = searchQuery + "+serie";  // Add "serie" hint for TV shows
-    }
-    
-    // Build French-Stream search URL
-    var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
-    
-    // Store original title for CALL 2 matching (title similarity scoring in parseDetailResponse)
-    LAST_SEARCH_TITLE = titleOnly;
-    
-    if (DEBUG) {
-      // Log: [CALL 2] Searching French-Stream for: titleOnly (type: mediaTypeMarker)
-      // Log: Search URL: searchUrl
-    }
-    
-    return searchUrl;
-  } catch (e) {
-    if (DEBUG) {
-      // Log: Error in getUrlDetail: e.toString()
-    }
-    // Fallback: return TMDB discover
-    return "https://api.themoviedb.org/3/discover/movie?api_key=" + TMDB_API_KEY + "&page=1";
-  }
+function buildParams(page) {
+    return "?api_key=" + TMDB_API_KEY + "&language=" + LANG + "&page=" + page;
 }
 
-function getUrlCategories() {
-  return (
-    "https://api.themoviedb.org/3/genre/movie/list?api_key=" +
-    TMDB_API_KEY +
-    "&language=en-US"
-  );
-}
+function parseListResponse(html) {
+    try {
+        var obj = JSON.parse(html);
+        var items = [];
+        var resItems = obj.results || [];
+        for (var i = 0; i < resItems.length; i++) {
+            var item = resItems[i];
+            var type = item.media_type; 
+            
+            if (!type) {
+                type = (item.first_air_date !== undefined || item.name !== undefined) ? "tv" : "movie";
+            }
+            if (type !== "movie" && type !== "tv") continue;
 
-// Helper function to get API headers for requests
-function getApiHeaders() {
-  return {
-    accept: "application/json",
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Referer: "https://www.themoviedb.org/",
-    "Accept-Language": "en-US,en;q=0.9",
-  };
-}
+            var dateRaw = item.release_date || item.first_air_date;
+            var year = dateRaw ? dateRaw.split("-")[0] : "N/A";
 
-// =============================================================================
-// PARSERS — Group 3: Data Processing (⭐ Most Important)
-// =============================================================================
-
-function parseListResponse(apiResponseJson) {
-  try {
-    var response = JSON.parse(apiResponseJson);
-    var results = response.results || [];
-    var page = response.page || 1;
-    var totalPages = response.total_pages || 1;
-    var totalResults = response.total_results || 0;
-
-    var movies = results.map(function (item) {
-      return {
-        id: String(item.id),
-        title: item.title || item.name || "Unknown",
-        posterUrl: item.poster_path
-          ? "https://image.tmdb.org/t/p/w500" + item.poster_path
-          : "",
-        backdropUrl: item.backdrop_path
-          ? "https://image.tmdb.org/t/p/w1280" + item.backdrop_path
-          : "",
-        description: item.overview || "",
-        year: item.release_date
-          ? parseInt(item.release_date.substring(0, 4), 10)
-          : 0,
-        quality: "",
-        episode_current: "",
-        lang: "",
-      };
-    });
-
-    return JSON.stringify({
-      items: movies,
-      pagination: {
-        currentPage: page,
-        totalPages: totalPages,
-        totalItems: totalResults,
-        itemsPerPage: results.length,
-      },
-    });
-  } catch (e) {
-    return JSON.stringify({
-      items: [],
-      pagination: {
-        currentPage: 1,
-        totalPages: 1,
-        totalItems: 0,
-        itemsPerPage: 0,
-      },
-    });
-  }
-}
-
-function parseSearchResponse(apiResponseJson) {
-  // Search API returns same format as discover, so reuse parser
-  return parseListResponse(apiResponseJson);
-}
-
-function parseMovieDetail(apiResponseJson) {
-  // ============================================================================
-  // CALL 1️⃣: DISPLAY MOVIE DETAILS FROM TMDB (METADATA & SERVERS)
-  // ============================================================================
-  // Input: JSON response from TMDB API (either movie or TV show)
-  // Output: Movie/TV metadata (title, poster, description, servers, episodes)
-  //
-  // Tasks:
-  // 1. Extract: title, poster, backdrop, description, rating
-  // 2. Extract: credits (cast, directors), genres
-  // 3. Detect whether response is MOVIE or TV SHOW (by checking for number_of_seasons)
-  // 4. Create servers array with play button
-  // 5. episodeId = "Title(Year)~TYPE" → use for CALL 2 search
-  // 6. App displays metadata & user clicks "Play" → trigger CALL 2
-  
-  try {
-    var movie = JSON.parse(apiResponseJson);
-
-    if (DEBUG) {
-      // Log: [CALL 1] Parsing movie detail for: movie.title
-      // Log: Movie ID: movie.id (for debugging)
-    }
-    
-    // Detect if this is a TV show or movie
-    // TV shows have: number_of_seasons, number_of_episodes, first_air_date
-    // Movies have: release_date, runtime, revenue
-    var isTV = !!(movie.number_of_seasons || movie.number_of_episodes);
-    var mediaType = isTV ? "tv" : "movie";
-    
-    // Store media type for use in getUrlDetail
-    LAST_MEDIA_TYPE = mediaType;
-
-    // Extract cast info
-    var casts = "";
-    if (movie.credits && movie.credits.cast) {
-      casts = movie.credits.cast
-        .slice(0, 5)
-        .map(function (actor) {
-          return actor.name;
-        })
-        .join(", ");
-    }
-
-    // Extract directors
-    var directors = "";
-    if (movie.credits && movie.credits.crew) {
-      var directorsList = movie.credits.crew.filter(function (crew) {
-        return crew.job === "Director";
-      });
-      directors = directorsList
-        .map(function (d) {
-          return d.name;
-        })
-        .join(", ");
-    }
-
-    // Extract genres
-    var genres = "";
-    if (movie.genres) {
-      genres = movie.genres
-        .map(function (g) {
-          return g.name;
-        })
-        .join(", ");
-    }
-
-    // Extract videos (trailer)
-    var videos = [];
-    if (movie.videos && movie.videos.results) {
-      var trailer = movie.videos.results.find(function (v) {
-        return v.type === "Trailer" && v.site === "YouTube";
-      });
-      if (trailer) {
-        videos.push({
-          name: "Trailer",
-          url: "https://www.youtube.com/watch?v=" + trailer.key,
-        });
-      }
-    }
-
-    // Build episode title with year for better matching
-    var releaseYear = 0;
-    if (isTV && movie.first_air_date) {
-      releaseYear = parseInt(movie.first_air_date.substring(0, 4), 10);
-    } else if (!isTV && movie.release_date) {
-      releaseYear = parseInt(movie.release_date.substring(0, 4), 10);
-    }
-    
-    // Create episodeId with type marker: "Title(Year)~TYPE"
-    // This helps getUrlDetail know whether to call /movie/ or /tv/ endpoint
-    var episodeId = movie.title || (isTV ? movie.name : "Unknown");
-    if (releaseYear > 0) {
-      episodeId = episodeId + "(" + releaseYear + ")~" + mediaType;
-    } else {
-      episodeId = episodeId + "~" + mediaType;
-    }
-
-    var episodes = [];
-    var servers = [];
-
-    // Create server with episode to trigger play action
-    // episode.id will be passed to getUrlDetail() as the movie/tv title for search
-    if (movie.id) {
-      servers.push({
-        name: "Watch Now",
-        episodes: [
-          {
-            id: episodeId,  // This includes type marker for proper endpoint routing
-            name: isTV ? "Watch Series" : "Play Movie",
-            slug: "stream",
-          },
-        ],
-      });
-    }
-
-    if (DEBUG) {
-      // Log: Created episode ID for search: episodeId (type: mediaType)
-    }
-
-    return JSON.stringify({
-      id: String(movie.id),
-      title: movie.title || movie.name || "Unknown",
-      originName: movie.original_title || movie.original_name || "",
-      posterUrl: movie.poster_path
-        ? "https://image.tmdb.org/t/p/w500" + movie.poster_path
-        : "",
-      backdropUrl: movie.backdrop_path
-        ? "https://image.tmdb.org/t/p/w1280" + movie.backdrop_path
-        : "",
-      description: movie.overview || "",
-      year: releaseYear,
-      rating: movie.vote_average || 0,
-      quality: "",
-      duration: isTV 
-        ? (movie.number_of_seasons || 0) + " seasons, " + (movie.number_of_episodes || 0) + " episodes"
-        : (movie.runtime || 0) + " min",
-      servers: servers,
-      episode_current: isTV ? ("Season 1" || "") : "",
-      lang: "",
-      category: genres,
-      country: isTV
-        ? (movie.origin_country ? movie.origin_country.join(", ") : "")
-        : (movie.origin_country ? movie.origin_country.join(", ") : ""),
-      director: directors,
-      casts: casts,
-      status: movie.status || (isTV ? "Ongoing" : "Released"),
-      videos: videos,
-      isTV: isTV,  // Include flag for app to handle differently if needed
-      mediaType: mediaType,
-    });
-  } catch (e) {
-    if (DEBUG) {
-      // Log: Error parsing movie detail: e.toString()
-    }
-    return JSON.stringify({
-      id: "",
-      title: "Error parsing movie",
-      posterUrl: "",
-      servers: [],
-      rating: 0,
-      error: true,
-    });
-  }
-}
-
-// ============================================================================= 
-// HELPER: URL Extraction from Packed/Eval Code
-// =============================================================================
-
-function extractUrlsFromEvalCode(html) {
-  // Try to extract URLs from eval(function(p,a,c,k,e,d){...}) packed code
-  // Returns array of vidzy URLs found
-  var urls = [];
-  
-  try {
-    // Pattern 1: Find src:"..." containing vidzy URLs directly
-    // Works for both packed and unpacked code
-    var srcPattern = /src:\s*["']([^"']*https:\/\/u\d+\.vidzy\.live\/hls2\/[^"']*master\.m3u8[^"']*?)["']/g;
-    var match;
-    
-    while ((match = srcPattern.exec(html)) !== null) {
-      if (match[1]) {
-        urls.push(match[1]);
-      }
-    }
-    
-    // Pattern 2: If not found via src, try to locate eval block and extract
-    if (urls.length === 0) {
-      // Look for eval(function pattern
-      var evalMatch = html.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)([\s\S]{0,50000}?)\}\s*\(/);
-      
-      if (evalMatch) {
-        var evalContent = evalMatch[1];
-        // Extract src patterns from packed code
-        var innerSrcPattern = /src["\']?\s*:\s*["\']([^"']*vidzy[^"']*master\.m3u8[^"']*)/g;
-        while ((match = innerSrcPattern.exec(evalContent)) !== null) {
-          if (match[1]) {
-            urls.push(match[1]);
-          }
-        }
-      }
-    }
-    
-    // Cleanup URLs - remove extra quotes/escapes
-    urls = urls.map(function(url) {
-      return url.replace(/[\\"']/g, '').trim();
-    });
-    
-    if (DEBUG) {
-      // Log: Found vidzy URLs in eval code: urls.length
-    }
-    
-    return urls;
-  } catch (e) {
-    if (DEBUG) {
-      // Log: Error extracting URLs from eval: e.toString()
-    }
-    return [];
-  }
-}
-
-// ============================================================================= 
-// HELPER: String Similarity Matching (for LẦN 2: Title Matching)
-// =============================================================================
-
-function calculateSimilarity(str1, str2) {
-  // Simple similarity score 0.0-1.0 (Jaccard + case-insensitive)
-  // Used to find best-matching movie from search results
-  try {
-    var s1 = str1.toLowerCase().trim();
-    var s2 = str2.toLowerCase().trim();
-    
-    if (s1 === s2) return 1.0;  // Perfect match
-    
-    // Split into words
-    var words1 = s1.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(function(w) { return w.length > 0; });
-    var words2 = s2.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(function(w) { return w.length > 0; });
-    
-    // Calculate Jaccard similarity
-    var intersection = 0;
-    var union = {};
-    
-    for (var i = 0; i < words1.length; i++) {
-      union[words1[i]] = true;
-    }
-    for (var j = 0; j < words2.length; j++) {
-      union[words2[j]] = true;
-      if (words1.indexOf(words2[j]) !== -1) {
-        intersection++;
-      }
-    }
-    
-    var unionSize = Object.keys(union).length;
-    var score = unionSize > 0 ? intersection / unionSize : 0;
-    
-    return score;
-  } catch (e) {
-    return 0;
-  }
-}
-
-function parseDetailResponse(html, originalTitle) {
-  // ============================================================================
-  // CALL 2️⃣: FIND MATCHING MOVIE ON FRENCH-STREAM
-  // ============================================================================
-  // Input: HTML from French-Stream search page + originalTitle from TMDB
-  // Output: URL of best-matching movie for fetching details
-  // 
-  // Strategy:
-  // 1. Extract all search results from HTML
-  // 2. Compare title of each result with originalTitle (using calculateSimilarity)
-  // 3. Select result with highest match score
-  // 4. Return movie detail URL (for CALL 3: parseEmbedResponse to extract video)
-  
-  try {
-    // Use LAST_SEARCH_TITLE if originalTitle not provided
-    var titleForMatching = originalTitle || LAST_SEARCH_TITLE;
-    
-    if (DEBUG) {
-      // Log: [CALL 2] Starting title matching with: titleForMatching
-    }
-    
-    // Extract all .short elements (movie results)
-    // Pattern: <div class="short">...<a class="short-poster" href="...">...</a>...<p class="short-title">Title</p>...</div>
-    var shortPattern = /<div\s+class="short"[^>]*>([\s\S]*?)<\/div>/g;
-    var shortMatches;
-    var items = [];
-    
-    while ((shortMatches = shortPattern.exec(html)) !== null) {
-      var shortHtml = shortMatches[1];
-      
-      // Extract href from .short-poster
-      var hrefMatch = shortHtml.match(/class="short-poster"[^>]*href="([^"]+)"/);
-      if (!hrefMatch) continue;
-      var href = hrefMatch[1];
-      
-      // Extract title from .short-title
-      var titleMatch = shortHtml.match(/class="short-title"[^>]*>\s*<a[^>]*>([^<]+)<\/a>/);
-      if (!titleMatch) {
-        titleMatch = shortHtml.match(/class="short-title"[^>]*>([^<]+)</);
-      }
-      if (!titleMatch) continue;
-      var title = titleMatch[1].trim();
-      
-      items.push({
-        href: href,
-        title: title
-      });
-    }
-    
-    if (DEBUG) {
-      // Log: [CALL 2] Found items.length search results
-    }
-    
-    // MATCHING: Compare titles and select best match
-    if (items.length > 0) {
-      var bestMatch = items[0];
-      var bestScore = 0;
-      
-      // If titleForMatching exists, use it for matching
-      if (titleForMatching && titleForMatching.length > 0) {
-        for (var i = 0; i < items.length; i++) {
-          var score = calculateSimilarity(titleForMatching, items[i].title);
-          if (DEBUG) {
-            // Log: items[i].title " -> similarity score: " + score
-          }
-          if (score > bestScore) {
-            bestScore = score;
-            bestMatch = items[i];
-          }
-        }
-      }
-      
-      if (DEBUG) {
-        // Log: [CALL 2] Selected best match: bestMatch.title (score: bestScore.toFixed(2))
-      }
-      
-      // Clear LAST_SEARCH_TITLE after use
-      LAST_SEARCH_TITLE = "";
-      
-      return JSON.stringify({
-        url: bestMatch.href,
-        isEmbed: true,  // Fetch this URL and parse with parseEmbedResponse (CALL 3)
-        headers: { "Referer": FRENCH_STREAM_DOMAIN }
-      });
-    }
-    
-    // No items found
-    LAST_SEARCH_TITLE = "";
-    return JSON.stringify({
-      url: "",
-      headers: { "Referer": FRENCH_STREAM_DOMAIN },
-      isEmbed: false
-    });
-  } catch (e) {
-    if (DEBUG) {
-      // Log: [CALL 2] Error in parseDetailResponse
-    }
-    LAST_SEARCH_TITLE = "";
-    return JSON.stringify({
-      url: "",
-      headers: { "Referer": FRENCH_STREAM_DOMAIN },
-      isEmbed: false
-    });
-  }
-}
-
-function parseEmbedResponse(html, sourceUrl) {
-  // ============================================================================
-  // CALL 3️⃣: EXTRACT VIDEO LINK FROM MOVIE DETAIL PAGE
-  // ============================================================================
-  // Input: HTML from movie detail page on French-Stream
-  // Output: Video URL + headers for app playback
-  //
-  // Strategy:
-  // 1. Search all regex patterns to find video link
-  // 2. Priority: Vidzy HLS > iframe > <source> > Direct URL
-  // 3. Extract headers: Referer, Origin, User-Agent
-  // 4. Return URL + headers + mimeType
-  
-  try {
-    // Pattern -1: Try to extract from eval(function(p,a,c,k,e,d){...}) packed code FIRST
-    // This handles videojs player code with src embedded in HTML
-    if (DEBUG) {
-      // Log: [CALL 3] Starting embed response parsing, checking for eval code
-    }
-    
-    var extractedUrls = extractUrlsFromEvalCode(html);
-    if (extractedUrls && extractedUrls.length > 0) {
-      if (DEBUG) {
-        // Log: [CALL 3] Found URL in eval code: extractedUrls[0]
-      }
-      return JSON.stringify({
-        url: extractedUrls[0],
-        headers: { 
-          "Referer": sourceUrl,
-          "Origin": "https://vidzy.live",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        isEmbed: false,
-        mimeType: "application/x-mpegURL"
-      });
-    }
-    
-    if (DEBUG) {
-      // Log: [CALL 3] No URL in eval code, trying direct patterns
-    }
-    
-    // Pattern 0: Vidzy.live HLS master playlist (priority)
-    // Looks for: https://u14.vidzy.live/hls2/.../master.m3u8?...
-    var vidzyMatch = html.match(/(https:\/\/u\d+\.vidzy\.live\/hls2\/[^"'\s]+master\.m3u8[^"'\s]*)/);
-    if (vidzyMatch && vidzyMatch[1]) {
-      if (DEBUG) {
-        // Log: [CALL 3] Found Vidzy HLS URL (direct pattern)
-      }
-      return JSON.stringify({
-        url: vidzyMatch[1],
-        headers: { 
-          "Referer": sourceUrl,
-          "Origin": "https://vidzy.live",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        },
-        isEmbed: false,
-        mimeType: "application/x-mpegURL"
-      });
-    }
-    
-    // Try to extract iframe src
-    var iframeMatch = html.match(/\<iframe[^>]*src=["']([^"']+)["'][^>]*\>/);
-    if (iframeMatch && iframeMatch[1]) {
-      var iframeUrl = iframeMatch[1];
-      
-      // If iframe points to another player, we need to fetch it
-      // For now, return it with isEmbed: true to fetch again
-      if (iframeUrl.indexOf(sourceUrl) === -1) {
-        if (DEBUG) {
-          // Log: [CALL 3] Found iframe URL (embedded player)
+            items.push({
+                id: type + "|" + item.id,
+                title: item.title || item.name,
+                posterUrl: item.poster_path ? IMG_BASE_URL + item.poster_path : "",
+                backdropUrl: item.backdrop_path ? IMG_BASE_URL + item.backdrop_path : "",
+                type: type === "movie" ? "MOVIE" : "TV SERIES",
+                lang: item.original_language ? item.original_language.toUpperCase() : "EN",
+                year: year,
+                episode_current: item.vote_average ? "⭐ " + item.vote_average.toFixed(1) : "?",
+                description: item.overview || "Đang cập nhật nội dung..."
+            });
         }
         return JSON.stringify({
-          url: iframeUrl,
-          isEmbed: true,
-          headers: { "Referer": sourceUrl }
+            items: items,
+            pagination: {
+                currentPage: obj.page,
+                totalPages: obj.total_pages
+            }
         });
-      }
+    } catch (e) {
+        return JSON.stringify({ items: [] });
     }
-    
-    // Try to extract video source URL patterns
-    // Pattern 1: <source src="...m3u8" type="application/x-mpegURL">
-    var sourceMatch = html.match(/\<source[^>]*src=["']([^"']+\.m3u8[^"']*)/);
-    if (sourceMatch && sourceMatch[1]) {
-      if (DEBUG) {
-        // Log: [CALL 3] Found source tag m3u8
-      }
-      return JSON.stringify({
-        url: sourceMatch[1],
-        headers: { "Referer": sourceUrl },
-        isEmbed: false,
-        mimeType: "application/x-mpegURL"
-      });
-    }
-    
-    // Pattern 2: Direct video URL in various formats
-    var videoMatch = html.match(/["']((https?:\/\/)?[^"']*\.(mp4|m3u8|mkv|webm)[^"']*)["\']/i);
-    if (videoMatch && videoMatch[1]) {
-      var videoUrl = videoMatch[1];
-      var isHls = videoUrl.indexOf(".m3u8") !== -1;
-      
-      if (DEBUG) {
-        // Log: [CALL 3] Found direct video URL (Pattern 2)
-      }
-      return JSON.stringify({
-        url: videoUrl,
-        headers: { "Referer": sourceUrl, "User-Agent": "Mozilla/5.0" },
-        isEmbed: false,
-        mimeType: isHls ? "application/x-mpegURL" : ""
-      });
-    }
-    
-    // Pattern 3: JavaScript embedded player data
-    var playerMatch = html.match(/file\s*:\s*["']([^"']+)["']/i);
-    if (playerMatch && playerMatch[1]) {
-      var playerUrl = playerMatch[1];
-      var isHls2 = playerUrl.indexOf(".m3u8") !== -1;
-      
-      if (DEBUG) {
-        // Log: [CALL 3] Found player data file URL (Pattern 3)
-      }
-      return JSON.stringify({
-        url: playerUrl,
-        headers: { "Referer": sourceUrl },
-        isEmbed: false,
-        mimeType: isHls2 ? "application/x-mpegURL" : ""
-      });
-    }
-    
-    if (DEBUG) {
-      // Log: [CALL 3] No video URL found - returning empty
-    }
-    
-    return JSON.stringify({
-      url: "",
-      headers: { "Referer": sourceUrl },
-      isEmbed: false
-    });
-  } catch (e) {
-    if (DEBUG) {
-      // Log: [CALL 3] Error parsing embed response: e.toString()
-    }
-    return JSON.stringify({
-      url: "",
-      isEmbed: false
-    });
-  }
 }
 
-function parseCategoriesResponse(apiResponseJson) {
-  try {
-    var response = JSON.parse(apiResponseJson);
-    var genres = response.genres || [];
+// =====================================================================
+// BƯỚC 1: ROUTING BẤM VÀO PHIM LẤY THÔNG TIN VÀ CHUYỂN HƯỚNG TỚI VIDSRC
+// =====================================================================
+function getUrlDetail(slug) {
+    var parts = slug.split("|");
+    var prefix = parts[0];
 
-    return JSON.stringify(
-      genres.map(function (g) {
-        return { id: String(g.id), name: g.name };
-      }),
-    );
-  } catch (e) {
-    return JSON.stringify([]);
-  }
+    // NẾU TÍN HIỆU ĐẾN TỪ NÚT XEM PHIM Ở APP: Bắn tới trang Xpass!
+    if (prefix === "xpass_tv") {
+        return "https://play.xpass.top/e/tv/" + parts[1] + "/" + parts[2] + "/" + parts[3];
+    }
+    if (prefix === "xpass_movie") {
+        return "https://play.xpass.top/e/movie/" + parts[1];
+    }
+
+    // Nguồn FrenchStream (search -> detail -> film_api -> vidzy embed -> m3u8)
+    if (prefix === "frs_tv") {
+        var metaTv = {
+            source: "french_stream",
+            type: "tv",
+            tmdbId: parts[1] || "",
+            season: parts[2] || "",
+            episode: parts[3] || "",
+            year: parts[4] || "",
+            title: safeDecodeURIComponent(parts[5] || "")
+        };
+        return buildFrenchSearchUrl(metaTv);
+    }
+    if (prefix === "frs_movie") {
+        var metaMovie = {
+            source: "french_stream",
+            type: "movie",
+            tmdbId: parts[1] || "",
+            year: parts[2] || "",
+            title: safeDecodeURIComponent(parts[3] || "")
+        };
+        return buildFrenchSearchUrl(metaMovie);
+    }
+
+    // NẾU LÀ GIAI ĐOẠN LẤY THÔNG TIN FILM (Cào metadata từ TMDB trước khi xem)
+    if (prefix === "tv" || prefix === "movie") {
+        return BASE_URL + "/" + prefix + "/" + parts[1] + "?api_key=" + TMDB_API_KEY + "&language=" + LANG + "&append_to_response=videos,credits";
+    }
+
+    return "";
+}
+
+function parseMovieDetail(html) {
+    try {
+        var json = JSON.parse(html);
+        if (json.id) {
+            var title = json.title || json.name;
+            var original = json.original_title || json.original_name;
+            var finalTitle = title !== original ? title + " (" + original + ")" : title;
+            var sourceTitle = original || title || finalTitle;
+            
+            var servers = [];
+            var cast = "";
+            var catList = [];
+            var director = "";
+
+            if (json.genres) {
+                for (var i = 0; i < json.genres.length; i++) catList.push(json.genres[i].name);
+            }
+            if (json.credits && json.credits.crew) {
+                for (var j = 0; j < json.credits.crew.length; j++) {
+                    if (json.credits.crew[j].job === "Director") {
+                        director = json.credits.crew[j].name;
+                        break;
+                    }
+                }
+            }
+
+            var dateRaw = json.release_date || json.first_air_date;
+            var year = dateRaw ? dateRaw.split("-")[0] : "N/A";
+            var duration = json.runtime || (json.episode_run_time ? json.episode_run_time[0] : 0) || 0;
+
+            // Nếu đây là cấu trúc phim bộ -> Chia season và tập
+            if (json.seasons && json.seasons.length > 0) {
+                cast = (json.credits && json.credits.cast) ? json.credits.cast.slice(0, 5).map(function(c) { return c.name; }).join(", ") : "";
+                for (var s = 0; s < json.seasons.length; s++) {
+                    var season = json.seasons[s];
+                    if (season.season_number > 0) {
+                        var epsXpass = [];
+                        var epsFrench = [];
+                        for (var i = 1; i <= season.episode_count; i++) {
+                            epsXpass.push({
+                                // Gửi kèm title để getServers dùng Search
+                                id: "xpass_tv|" + json.id + "|" + season.season_number + "|" + i + "|" + encodeURIComponent(finalTitle),
+                                name: "Tập " + i,
+                                slug: season.season_number + "_" + i
+                            });
+                            epsFrench.push({
+                                id: "frs_tv|" + json.id + "|" + season.season_number + "|" + i + "|" + year + "|" + encodeURIComponent(sourceTitle),
+                                name: "Tập " + i,
+                                slug: season.season_number + "_" + i
+                            });
+                        }
+
+                        servers.push({
+                            name: "Xpass - Phần " + season.season_number,
+                            episodes: epsXpass
+                        });
+
+                        servers.push({
+                            name: "FrenchStream - Phần " + season.season_number,
+                            episodes: epsFrench
+                        });
+                    }
+                }
+            } else {
+                cast = (json.credits && json.credits.cast) ? json.credits.cast.slice(0, 5).map(function(c) { return c.name; }).join(", ") : "";
+                var encodedSourceTitle = encodeURIComponent(sourceTitle || finalTitle);
+
+                // Phim lẻ 
+                servers.push({
+                    name: "Nguồn VIP - Xpass",
+                    episodes: [{
+                        // Gửi kèm title
+                        id: "xpass_movie|" + json.id + "|" + encodeURIComponent(finalTitle),
+                        name: "Full HD",
+                        slug: "full"
+                    }]
+                });
+
+                servers.push({
+                    name: "Nguồn FrenchStream",
+                    episodes: [{
+                        id: "frs_movie|" + json.id + "|" + year + "|" + encodedSourceTitle,
+                        name: "Full HD - French",
+                        slug: "full_french"
+                    }]
+                });
+            }
+            
+            return JSON.stringify({
+                title: finalTitle,
+                description: json.overview,
+                backdropUrl: json.backdrop_path ? IMG_BASE_URL + json.backdrop_path : "",
+                posterUrl: json.poster_path ? IMG_BASE_URL + json.poster_path : "",
+                year: year,
+                quality: "HD",
+                status: json.status || "Full",
+                rating: json.vote_average ? json.vote_average.toFixed(1) : "?",
+                duration: duration ? duration + " Phút" : "N/A",
+                category: catList.length > 0 ? catList.join(", ") : "N/A",
+                director: director || "N/A",
+                casts: cast || "N/A",
+                servers: servers, 
+                headers: {},
+                isEmbed: true 
+            });
+        }
+    } catch(e) {}
+    return JSON.stringify({ title: "Không tải được dữ liệu", servers: [] });
+}
+
+function parseDetailResponse(html, sourceUrl) {
+    var requestUrl = String(sourceUrl || "");
+
+    // Giai đoạn: Người dùng đã bấm Xem Phim Tập N -> HTML này là giao diện web Xpass
+    var playlistMatch = html.match(/"playlist"\s*:\s*"([^"]+)"/i);
+    if (playlistMatch) {
+        var playlistUrl = "https://play.xpass.top" + playlistMatch[1];
+        return JSON.stringify({ 
+            // Trả về url playlist.json, VAAPP sẽ tiếp tục Fetch đệ quy cái url này qua parseEmbedResponse
+            url: playlistUrl, 
+            isEmbed: true 
+        });
+    }
+
+    // Nguồn FrenchStream: parse trang search để tìm detail link phù hợp
+    if (requestUrl.indexOf(FRENCH_STREAM_DOMAIN) !== -1 && requestUrl.indexOf("subaction=search") !== -1) {
+        var meta = parseFrenchMetaFromUrl(requestUrl);
+        var headers = buildFrenchHeaders(requestUrl);
+        var items = parseFrenchSearchItems(html);
+        var detailUrl = findFrenchDetailUrl(items, meta);
+
+        debugLog("[FrenchStream] urlRequest:", requestUrl);
+        debugLog("[FrenchStream] headers:", JSON.stringify(headers));
+        debugLog("[FrenchStream] item count:", items.length);
+
+        if (detailUrl) {
+            return JSON.stringify({
+                url: detailUrl,
+                headers: headers,
+                isEmbed: true
+            });
+        }
+    }
+
+    return JSON.stringify({url: ""});
+}
+
+function parseEmbedResponse(html, url) { 
+    // Giai đoạn: Nhận HTML (hoặc JSON) từ nguồn chi tiết
+
+    // 1. Nếu là nguồn Ophim fallback (Ophim detail JSON)
+    if (url && url.indexOf("ophim1.com/v1/api/phim/") !== -1) {
+        try {
+            var data = JSON.parse(html);
+            var epIndex = 1;
+            // Trích xuất ?ep= từ url
+            if (url.indexOf("?ep=") !== -1) {
+                epIndex = parseInt(url.split("?ep=")[1]);
+            }
+            
+            var streamUrl = "";
+            var rawEpisodes = data.episodes || (data.data && data.data.item && data.data.item.episodes) || [];
+            
+            if (rawEpisodes.length > 0) {
+                var serverData = rawEpisodes[0].server_data;
+                if (serverData && serverData.length > 0) {
+                    // Tìm tập theo tên hoặc theo index
+                    var epData = serverData[0]; // Mặc định tập 1
+                    for (var j = 0; j < serverData.length; j++) {
+                        if (serverData[j].name === epIndex.toString() || serverData[j].name.toLowerCase() === "full") {
+                            epData = serverData[j];
+                            break;
+                        }
+                    }
+                    
+                    streamUrl = epData.link_m3u8 || epData.link_embed || "";
+                }
+            }
+            
+            return JSON.stringify({
+                url: streamUrl,
+                headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://ophim1.com" },
+                subtitles: [],
+                isEmbed: false
+            });
+        } catch(e) {}
+    }
+
+    // 2. Nguồn FrenchStream: từ detail page -> film_api.php
+    if (url && url.indexOf(FRENCH_STREAM_DOMAIN) !== -1 && url.indexOf("/engine/ajax/film_api.php") === -1) {
+        try {
+            var newsIdMatch = html.match(/data-newsid\s*=\s*"?(\d+)/i);
+            if (newsIdMatch) {
+                var apiUrl = FRENCH_STREAM_DOMAIN + "/engine/ajax/film_api.php?id=" + newsIdMatch[1];
+                debugLog("[FrenchStream] detail -> api:", apiUrl);
+                return JSON.stringify({
+                    url: apiUrl,
+                    headers: buildFrenchHeaders(url),
+                    isEmbed: true
+                });
+            }
+        } catch (e1) {
+            debugLog("[FrenchStream] detail parse error:", e1.message || e1);
+        }
+    }
+
+    // 3. Nguồn FrenchStream: film_api.php -> chọn player URL
+    if (url && url.indexOf("/engine/ajax/film_api.php") !== -1) {
+        try {
+            var api = JSON.parse(html);
+            var pickedUrl = pickFrenchPlayerUrl(api && api.players ? api.players : {});
+            if (pickedUrl) {
+                debugLog("[FrenchStream] picked player URL:", pickedUrl);
+                return JSON.stringify({
+                    url: pickedUrl,
+                    headers: {
+                        "Referer": FRENCH_STREAM_DOMAIN + "/",
+                        "Origin": FRENCH_STREAM_DOMAIN
+                    },
+                    isEmbed: true
+                });
+            }
+        } catch (e2) {
+            debugLog("[FrenchStream] film_api parse error:", e2.message || e2);
+        }
+    }
+
+    // 4. Nguồn FrenchStream: ViDZY / FSVID embed -> giải script packer để lấy m3u8 thật
+    if (url && (url.indexOf("vidzy.live/embed-") !== -1 || url.indexOf("fsvid.lol/embed-") !== -1)) {
+        try {
+            var streamFromPacked = extractPackedM3u8Url(html);
+            if (streamFromPacked) {
+                var originHost = (url.indexOf("fsvid.lol") !== -1) ? "https://fsvid.lol" : "https://vidzy.live";
+                debugLog("[FrenchStream] extracted m3u8:", streamFromPacked);
+                return JSON.stringify({
+                    url: streamFromPacked,
+                    headers: {
+                        "Referer": originHost + "/",
+                        "Origin": originHost
+                    },
+                    mimeType: "application/vnd.apple.mpegurl",
+                    subtitles: [],
+                    isEmbed: false
+                });
+            }
+        } catch (e3) {
+            debugLog("[FrenchStream] packed stream parse error:", e3.message || e3);
+        }
+    }
+
+    // 5. Nếu là nguồn Xpass playlist (Xpass JSON)
+    try {
+        var json = JSON.parse(html);
+        if (json.playlist && json.playlist.length > 0) {
+            var sources = json.playlist[0].sources;
+            if (sources && sources.length > 0) {
+                var streamUrl = sources[0].file;
+                
+                // M3U8 CHUẨN! Trả về cho Native Video Player
+                return JSON.stringify({ 
+                    url: streamUrl, 
+                    headers: { "Referer": "https://play.xpass.top/", "Origin": "https://play.xpass.top" },
+                    subtitles: [],
+                    isEmbed: false 
+                }); 
+            }
+        }
+    } catch(e) {}
+    
+    // Fallback chung
+    return JSON.stringify({ url: "", isEmbed: false }); 
+}
+
+function safeDecodeURIComponent(value) {
+    try {
+        return decodeURIComponent(value);
+    } catch (e) {
+        return value || "";
+    }
+}
+
+function decodeHtmlEntities(text) {
+    return String(text || "")
+        .replace(/&#(\d+);/g, function(_, n) { return String.fromCharCode(parseInt(n, 10)); })
+        .replace(/&#x([0-9a-f]+);/gi, function(_, n) { return String.fromCharCode(parseInt(n, 16)); })
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;|&apos;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ");
+}
+
+function normalizeTitleForCompare(text) {
+    var value = decodeHtmlEntities(text || "");
+    value = value.replace(/<[^>]*>/g, " ");
+    if (typeof value.normalize === "function") {
+        value = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
+    value = value.toLowerCase();
+    value = value.replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    return value;
+}
+
+function toAbsoluteUrl(base, url) {
+    var clean = String(url || "").trim();
+    if (!clean) return "";
+    if (/^https?:\/\//i.test(clean)) return clean;
+    if (clean.indexOf("//") === 0) return "https:" + clean;
+    if (clean.charAt(0) === "/") return String(base || "").replace(/\/$/, "") + clean;
+    return String(base || "").replace(/\/$/, "") + "/" + clean.replace(/^\//, "");
+}
+
+function buildFrenchSearchUrl(meta) {
+    var title = String(meta && meta.title ? meta.title : "").toLowerCase().trim();
+    var story = encodeURIComponent(title).replace(/%20/g, "+");
+    var urlRequest = FRENCH_STREAM_DOMAIN + "/?story=" + story + "&do=search&subaction=search";
+
+    try {
+        urlRequest += "&va_meta=" + encodeURIComponent(JSON.stringify(meta || {}));
+    } catch (e) {
+        // no-op
+    }
+
+    return urlRequest;
+}
+
+function parseFrenchMetaFromUrl(url) {
+    var query = String(url || "");
+    var match = query.match(/[?&]va_meta=([^&]+)/i);
+    if (!match) return {};
+
+    try {
+        return JSON.parse(decodeURIComponent(match[1]));
+    } catch (e) {
+        return {};
+    }
+}
+
+function buildFrenchHeaders(urlRequest) {
+    var headers = {
+        "Referer": String(urlRequest || FRENCH_STREAM_DOMAIN + "/")
+    };
+
+    if (FRENCH_STREAM_COOKIE) {
+        headers["Cookie"] = FRENCH_STREAM_COOKIE;
+        headers["User-Agent"] = FRENCH_STREAM_USER_AGENT;
+    }
+
+    return headers;
+}
+
+function parseFrenchSearchItems(html) {
+    var out = [];
+    var chunks = String(html || "").split(/<div class="short">/i);
+
+    for (var i = 1; i < chunks.length; i++) {
+        var chunk = chunks[i];
+        var hrefMatch = chunk.match(/class="short-poster[^\"]*"[^>]*href="([^"]+)"/i);
+        var titleMatch = chunk.match(/class="short-title">\s*([\s\S]*?)\s*<\/div>/i);
+
+        if (!hrefMatch || !titleMatch) continue;
+
+        var href = toAbsoluteUrl(FRENCH_STREAM_DOMAIN, hrefMatch[1]);
+        var title = decodeHtmlEntities(titleMatch[1]).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+
+        if (!href || !title) continue;
+        out.push({
+            href: href,
+            title: title,
+            normalized: normalizeTitleForCompare(title)
+        });
+    }
+
+    return out;
+}
+
+function buildFrenchTitleTargets(meta) {
+    var title = String(meta && meta.title ? meta.title : "").trim();
+    var year = String(meta && meta.year ? meta.year : "").trim();
+    var season = String(meta && meta.season ? meta.season : "").trim();
+    var type = String(meta && meta.type ? meta.type : "movie").toLowerCase();
+
+    var targets = [];
+    if (!title) return targets;
+
+    if (type === "tv") {
+        if (season) {
+            targets.push(title + " - Saison " + season);
+            targets.push(title + " Saison " + season);
+            targets.push(title + ": Saison " + season);
+        }
+        targets.push(title);
+    } else {
+        targets.push(title);
+        if (year && year !== "N/A") {
+            targets.push(title + "(" + year + ")");
+            targets.push(title + " (" + year + ")");
+            targets.push(title + " " + year);
+        }
+    }
+
+    var normalized = [];
+    var seen = {};
+
+    for (var i = 0; i < targets.length; i++) {
+        var norm = normalizeTitleForCompare(targets[i]);
+        if (!norm || seen[norm]) continue;
+        seen[norm] = true;
+        normalized.push(norm);
+    }
+
+    return normalized;
+}
+
+function isFrenchTitleMatch(candidate, target) {
+    if (!candidate || !target) return false;
+    if (candidate === target) return true;
+    if (candidate.indexOf(target) !== -1) return true;
+    if (target.indexOf(candidate) !== -1) {
+        var minLen = Math.max(8, Math.floor(target.length * 0.85));
+        if (candidate.length >= minLen) return true;
+    }
+    return false;
+}
+
+function computeTitleSimilarity(candidate, target) {
+    if (!candidate || !target) return 0;
+    if (isFrenchTitleMatch(candidate, target)) return 1;
+
+    var candParts = candidate.split(/\s+/).filter(Boolean);
+    var targetParts = target.split(/\s+/).filter(Boolean);
+    if (candParts.length === 0 || targetParts.length === 0) return 0;
+
+    var lookup = {};
+    for (var i = 0; i < targetParts.length; i++) {
+        lookup[targetParts[i]] = true;
+    }
+
+    var common = 0;
+    for (var j = 0; j < candParts.length; j++) {
+        if (lookup[candParts[j]]) common += 1;
+    }
+
+    var denom = Math.max(targetParts.length, candParts.length);
+    return denom > 0 ? (common / denom) : 0;
+}
+
+function findFrenchDetailUrl(items, meta) {
+    if (!items || items.length === 0) return "";
+    var targets = buildFrenchTitleTargets(meta || {});
+    var bestItem = null;
+    var bestScore = 0;
+
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        debugLog("[FrenchStream] compare title:", item.title);
+
+        for (var j = 0; j < targets.length; j++) {
+            var score = computeTitleSimilarity(item.normalized, targets[j]);
+            if (score > bestScore) {
+                bestScore = score;
+                bestItem = item;
+            }
+
+            if (score >= 0.96) {
+                debugLog("[FrenchStream] matched detail:", item.href);
+                return item.href;
+            }
+        }
+    }
+
+    if (bestItem && bestScore >= 0.65) {
+        debugLog("[FrenchStream] fuzzy matched detail:", bestItem.href, "score=", bestScore);
+        return bestItem.href;
+    }
+
+    debugLog("[FrenchStream] no strict match, fallback first item:", items[0].href);
+    return items[0].href;
+}
+
+function pickFrenchPlayerUrl(players) {
+    if (!players || typeof players !== "object") return "";
+
+    var candidates = [
+        players.vidzy && players.vidzy["default"],
+        players.vidzy && players.vidzy.vostfr,
+        players.vidzy && players.vidzy.vfq,
+        players.vidzy && players.vidzy.vff,
+        players.premium && players.premium["default"],
+        players.uqload && players.uqload["default"],
+        players.voe && players.voe["default"],
+        players.filmoon && players.filmoon["default"],
+        players.dood && players.dood["default"]
+    ];
+
+    if (players.netu && players.netu["default"]) {
+        candidates.push("https://1.multiup.us/player/embed_player.php?vid=" + players.netu["default"] + "&autoplay=no");
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+        var url = String(candidates[i] || "").trim();
+        if (/^https?:\/\//i.test(url)) {
+            return url;
+        }
+    }
+
+    return "";
+}
+
+function unpackEvalScripts(html) {
+    var source = String(html || "");
+    var scripts = [];
+    var regex = /eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\('[\s\S]*?\.split\('\|'\)\)\)/g;
+    var match;
+
+    while ((match = regex.exec(source)) !== null) {
+        try {
+            var expression = match[0].slice(5, -1); // remove eval( ... )
+            var decoded = (new Function("return (" + expression + ");"))();
+            if (decoded) scripts.push(String(decoded));
+        } catch (e) {
+            debugLog("[FrenchStream] unpack eval error:", e.message || e);
+        }
+    }
+
+    return scripts;
+}
+
+function extractPackedM3u8Url(html) {
+    var rawHtml = String(html || "");
+    var direct = rawHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
+    if (direct && direct[0]) {
+        return decodeHtmlEntities(direct[0]);
+    }
+
+    var decodedScripts = unpackEvalScripts(rawHtml);
+    for (var i = 0; i < decodedScripts.length; i++) {
+        var m3u8Match = decodedScripts[i].match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
+        if (m3u8Match && m3u8Match[0]) {
+            return decodeHtmlEntities(m3u8Match[0]);
+        }
+    }
+
+    return "";
+}
+
+function getUrlCategories() { return ""; }
+function getUrlCountries() { return ""; }
+function getUrlYears() { return ""; }
+function parseCountriesResponse(html) { return "[]"; }
+function parseYearsResponse(html) { return "[]"; }
+function parseCategoriesResponse(html) { return "[]"; }
+
+// =====================================================================
+// BƯỚC 3: HỆ THỐNG GET SERVERS (FALLBACK TỪ OPHIM)
+// =====================================================================
+
+var _fallbackEpIndex = 1;
+
+function getServers(slug) {
+    var parts = slug.split("|");
+    var prefix = parts[0];
+    var title = "";
+    
+    if (prefix === "xpass_tv") {
+        _fallbackEpIndex = parts[3]; // Lưu lại tập đang xem
+        title = decodeURIComponent(parts[4] || "");
+    } else if (prefix === "xpass_movie") {
+        _fallbackEpIndex = "Full";
+        title = decodeURIComponent(parts[2] || "");
+    }
+    
+    if (title) {
+        // App fetch API tìm kiếm của Ophim
+        return "https://ophim1.com/v1/api/tim-kiem?keyword=" + encodeURIComponent(title);
+    }
+    return "";
+}
+
+function parseServerResponse(html) {
+    try {
+        var res = JSON.parse(html);
+        if (res.data && res.data.items && res.data.items.length > 0) {
+            // Lấy thẳng kết quả đầu tiên map được từ Ophim
+            var slug = res.data.items[0].slug;
+            
+            // App sẽ tiếp tục dùng url này gọi parseEmbedResponse
+            return JSON.stringify({
+                name: "OPhim Dự Phòng",
+                url: "https://ophim1.com/v1/api/phim/" + slug + "?ep=" + _fallbackEpIndex,
+                isEmbed: true
+            });
+        }
+    } catch(e) {}
+    
+    // Nếu tìm không thấy trên Ophim, nín luôn không hiển thị gì
+    return JSON.stringify({});
 }
