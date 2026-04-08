@@ -5,6 +5,7 @@ var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
 var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
 var DEBUG = true;  // Set to true for debugging
 var LAST_SEARCH_TITLE = "";  // Track original title for matching in parseDetailResponse (CALL 2)
+var LAST_MEDIA_TYPE = "movie";  // Track media type (movie or tv) for detail fetching
 
 function getManifest() {
   return JSON.stringify({
@@ -198,20 +199,24 @@ function getUrlSearch(keyword, filtersJson) {
 
 function getUrlDetail(slug) {
   // slug can be:
-  // 1. movie ID (numeric string) - when user clicks from list → fetch TMDB detail
-  // 2. movie title (string) - when user clicks Play → search on french-stream
+  // 1. movie/TV ID (numeric string) - when user clicks from list → fetch TMDB detail
+  // 2. movie/TV title (string with type marker) - when user clicks Play → search on french-stream
+  //    Format: "Title(Year)~TYPE" where TYPE is "movie" or "tv"
   
   try {
     // Check if slug is a numeric ID
     if (/^\d+$/.test(slug)) {
-      // ✅ MODE 1 (CALL 1): TMDB MODE - Fetch movie detail from TMDB
+      // ✅ MODE 1 (CALL 1): TMDB MODE - Fetch movie/TV detail from TMDB
       if (DEBUG) {
-        // Log: [CALL 1] Fetching TMDB detail for movie ID: slug
+        // Log: [CALL 1] Fetching TMDB detail for ID: slug (using type: LAST_MEDIA_TYPE)
       }
       
-      var url = "https://api.themoviedb.org/3/movie/" + slug;
+      // Use the media type to call the correct endpoint
+      var mediaType = LAST_MEDIA_TYPE || "movie";
+      var url = "https://api.themoviedb.org/3/" + mediaType + "/" + slug;
       url += "?api_key=" + TMDB_API_KEY;
       url += "&language=en-US";
+      url += "&append_to_response=credits";  // Get credits for both movie and TV
       
       return url;
     }
@@ -221,20 +226,35 @@ function getUrlDetail(slug) {
       // Log: [CALL 2] Searching french-stream for title: slug
     }
     
+    // Parse type marker from slug format: "Title(Year)~TYPE"
+    var mediaTypeMarker = "movie";  // Default
+    var titleForSearch = slug;
+    
+    var typeMatch = slug.match(/~(movie|tv)$/);
+    if (typeMatch) {
+      mediaTypeMarker = typeMatch[1];
+      titleForSearch = slug.replace(/~(movie|tv)$/, "");  // Remove type marker
+    }
+    
     // Extract year if present (format: "Title(2024)")
     var year = 0;
-    var titleOnly = slug;
+    var titleOnly = titleForSearch;
     
-    var yearMatch = slug.match(/\((\d{4})\)/);
+    var yearMatch = titleForSearch.match(/\((\d{4})\)/);
     if (yearMatch) {
       year = parseInt(yearMatch[1], 10);
-      titleOnly = slug.replace(/\s*\(\d{4}\)\s*$/, "");
+      titleOnly = titleForSearch.replace(/\s*\(\d{4}\)\s*$/, "");
     }
     
     // Prepare search query: lowercase, URL encode, replace %20 with +
     var searchQuery = titleOnly.toLowerCase();
     searchQuery = encodeURIComponent(searchQuery);
     searchQuery = searchQuery.replace(/%20/g, "+");
+    
+    // For TV shows, append type hint to search
+    if (mediaTypeMarker === "tv") {
+      searchQuery = searchQuery + "+serie";  // Add "serie" hint for TV shows
+    }
     
     // Build French-Stream search URL
     var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
@@ -243,7 +263,8 @@ function getUrlDetail(slug) {
     LAST_SEARCH_TITLE = titleOnly;
     
     if (DEBUG) {
-      // Log: [CALL 2] French-Stream search URL: searchUrl, will use: titleOnly for matching
+      // Log: [CALL 2] Searching French-Stream for: titleOnly (type: mediaTypeMarker)
+      // Log: Search URL: searchUrl
     }
     
     return searchUrl;
@@ -338,15 +359,16 @@ function parseMovieDetail(apiResponseJson) {
   // ============================================================================
   // CALL 1️⃣: DISPLAY MOVIE DETAILS FROM TMDB (METADATA & SERVERS)
   // ============================================================================
-  // Input: JSON response from TMDB API
-  // Output: Movie metadata (title, poster, description, servers, episodes)
+  // Input: JSON response from TMDB API (either movie or TV show)
+  // Output: Movie/TV metadata (title, poster, description, servers, episodes)
   //
   // Tasks:
   // 1. Extract: title, poster, backdrop, description, rating
   // 2. Extract: credits (cast, directors), genres
-  // 3. Create servers array with play button
-  // 4. episodeId = "Title(Year)" → use for CALL 2 search
-  // 5. App displays metadata & user clicks "Play" → trigger CALL 2
+  // 3. Detect whether response is MOVIE or TV SHOW (by checking for number_of_seasons)
+  // 4. Create servers array with play button
+  // 5. episodeId = "Title(Year)~TYPE" → use for CALL 2 search
+  // 6. App displays metadata & user clicks "Play" → trigger CALL 2
   
   try {
     var movie = JSON.parse(apiResponseJson);
@@ -355,6 +377,15 @@ function parseMovieDetail(apiResponseJson) {
       // Log: [CALL 1] Parsing movie detail for: movie.title
       // Log: Movie ID: movie.id (for debugging)
     }
+    
+    // Detect if this is a TV show or movie
+    // TV shows have: number_of_seasons, number_of_episodes, first_air_date
+    // Movies have: release_date, runtime, revenue
+    var isTV = !!(movie.number_of_seasons || movie.number_of_episodes);
+    var mediaType = isTV ? "tv" : "movie";
+    
+    // Store media type for use in getUrlDetail
+    LAST_MEDIA_TYPE = mediaType;
 
     // Extract cast info
     var casts = "";
@@ -406,27 +437,33 @@ function parseMovieDetail(apiResponseJson) {
 
     // Build episode title with year for better matching
     var releaseYear = 0;
-    if (movie.release_date) {
+    if (isTV && movie.first_air_date) {
+      releaseYear = parseInt(movie.first_air_date.substring(0, 4), 10);
+    } else if (!isTV && movie.release_date) {
       releaseYear = parseInt(movie.release_date.substring(0, 4), 10);
     }
     
-    var episodeId = movie.title;  // Default
+    // Create episodeId with type marker: "Title(Year)~TYPE"
+    // This helps getUrlDetail know whether to call /movie/ or /tv/ endpoint
+    var episodeId = movie.title || (isTV ? movie.name : "Unknown");
     if (releaseYear > 0) {
-      episodeId = movie.title + "(" + releaseYear + ")";  // Add year for search
+      episodeId = episodeId + "(" + releaseYear + ")~" + mediaType;
+    } else {
+      episodeId = episodeId + "~" + mediaType;
     }
 
     var episodes = [];
     var servers = [];
 
     // Create server with episode to trigger play action
-    // episode.id will be passed to getUrlDetail() as the movie title for search
+    // episode.id will be passed to getUrlDetail() as the movie/tv title for search
     if (movie.id) {
       servers.push({
         name: "Watch Now",
         episodes: [
           {
-            id: episodeId,  // This will be the search query
-            name: "Play Movie",
+            id: episodeId,  // This includes type marker for proper endpoint routing
+            name: isTV ? "Watch Series" : "Play Movie",
             slug: "stream",
           },
         ],
@@ -434,13 +471,13 @@ function parseMovieDetail(apiResponseJson) {
     }
 
     if (DEBUG) {
-      // Log: Created episode ID for search: episodeId
+      // Log: Created episode ID for search: episodeId (type: mediaType)
     }
 
     return JSON.stringify({
       id: String(movie.id),
-      title: movie.title || "Unknown",
-      originName: movie.original_title || "",
+      title: movie.title || movie.name || "Unknown",
+      originName: movie.original_title || movie.original_name || "",
       posterUrl: movie.poster_path
         ? "https://image.tmdb.org/t/p/w500" + movie.poster_path
         : "",
@@ -451,16 +488,22 @@ function parseMovieDetail(apiResponseJson) {
       year: releaseYear,
       rating: movie.vote_average || 0,
       quality: "",
-      duration: (movie.runtime || 0) + " min",
+      duration: isTV 
+        ? (movie.number_of_seasons || 0) + " seasons, " + (movie.number_of_episodes || 0) + " episodes"
+        : (movie.runtime || 0) + " min",
       servers: servers,
-      episode_current: "",
+      episode_current: isTV ? ("Season 1" || "") : "",
       lang: "",
       category: genres,
-      country: movie.origin_country ? movie.origin_country.join(", ") : "",
+      country: isTV
+        ? (movie.origin_country ? movie.origin_country.join(", ") : "")
+        : (movie.origin_country ? movie.origin_country.join(", ") : ""),
       director: directors,
       casts: casts,
-      status: movie.status || "",
+      status: movie.status || (isTV ? "Ongoing" : "Released"),
       videos: videos,
+      isTV: isTV,  // Include flag for app to handle differently if needed
+      mediaType: mediaType,
     });
   } catch (e) {
     if (DEBUG) {
