@@ -4,6 +4,7 @@
 var TMDB_API_KEY = "5e515caadf8d52a665cf230e3676ee63";
 var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
 var DEBUG = true;  // Set to true for debugging
+var LAST_SEARCH_TITLE = "";  // Track original title for matching in parseDetailResponse (CALL 2)
 
 function getManifest() {
   return JSON.stringify({
@@ -203,22 +204,21 @@ function getUrlDetail(slug) {
   try {
     // Check if slug is a numeric ID
     if (/^\d+$/.test(slug)) {
-      // Case 1: This is a TMDB movie ID - fetch movie detail from TMDB
+      // ✅ MODE 1 (CALL 1): TMDB MODE - Fetch movie detail from TMDB
       if (DEBUG) {
-        // Log: Fetching TMDB detail for movie ID: slug
+        // Log: [CALL 1] Fetching TMDB detail for movie ID: slug
       }
       
       var url = "https://api.themoviedb.org/3/movie/" + slug;
       url += "?api_key=" + TMDB_API_KEY;
       url += "&language=en-US";
-      url += "&append_to_response=credits,videos,external_ids";
       
       return url;
     }
     
-    // Case 2: This is a movie TITLE - search on french-stream
+    // ✅ MODE 2 (CALL 2): SEARCH MODE - Search on french-stream with title
     if (DEBUG) {
-      // Log: Searching french-stream for title: slug
+      // Log: [CALL 2] Searching french-stream for title: slug
     }
     
     // Extract year if present (format: "Title(2024)")
@@ -239,8 +239,11 @@ function getUrlDetail(slug) {
     // Build French-Stream search URL
     var searchUrl = FRENCH_STREAM_DOMAIN + "/?story=" + searchQuery + "&do=search&subaction=search";
     
+    // Store original title for CALL 2 matching (title similarity scoring in parseDetailResponse)
+    LAST_SEARCH_TITLE = titleOnly;
+    
     if (DEBUG) {
-      // Log: French-Stream search URL: searchUrl
+      // Log: [CALL 2] French-Stream search URL: searchUrl, will use: titleOnly for matching
     }
     
     return searchUrl;
@@ -332,12 +335,25 @@ function parseSearchResponse(apiResponseJson) {
 }
 
 function parseMovieDetail(apiResponseJson) {
+  // ============================================================================
+  // CALL 1️⃣: DISPLAY MOVIE DETAILS FROM TMDB (METADATA & SERVERS)
+  // ============================================================================
+  // Input: JSON response from TMDB API
+  // Output: Movie metadata (title, poster, description, servers, episodes)
+  //
+  // Tasks:
+  // 1. Extract: title, poster, backdrop, description, rating
+  // 2. Extract: credits (cast, directors), genres
+  // 3. Create servers array with play button
+  // 4. episodeId = "Title(Year)" → use for CALL 2 search
+  // 5. App displays metadata & user clicks "Play" → trigger CALL 2
+  
   try {
     var movie = JSON.parse(apiResponseJson);
 
     if (DEBUG) {
-      // Log: Parsing movie detail for: movie.title
-      // Log: Movie ID: movie.id
+      // Log: [CALL 1] Parsing movie detail for: movie.title
+      // Log: Movie ID: movie.id (for debugging)
     }
 
     // Extract cast info
@@ -418,7 +434,7 @@ function parseMovieDetail(apiResponseJson) {
     }
 
     if (DEBUG) {
-      // Log: Created episode ID: episodeId
+      // Log: Created episode ID for search: episodeId
     }
 
     return JSON.stringify({
@@ -461,11 +477,124 @@ function parseMovieDetail(apiResponseJson) {
   }
 }
 
-function parseDetailResponse(html) {
-  // Receives HTML from french-stream.one search page
-  // Parse HTML to find matching movie and return its detail link
+// ============================================================================= 
+// HELPER: URL Extraction from Packed/Eval Code
+// =============================================================================
+
+function extractUrlsFromEvalCode(html) {
+  // Try to extract URLs from eval(function(p,a,c,k,e,d){...}) packed code
+  // Returns array of vidzy URLs found
+  var urls = [];
+  
   try {
-    // Extract all .short elements (movie items)
+    // Pattern 1: Find src:"..." containing vidzy URLs directly
+    // Works for both packed and unpacked code
+    var srcPattern = /src:\s*["']([^"']*https:\/\/u\d+\.vidzy\.live\/hls2\/[^"']*master\.m3u8[^"']*?)["']/g;
+    var match;
+    
+    while ((match = srcPattern.exec(html)) !== null) {
+      if (match[1]) {
+        urls.push(match[1]);
+      }
+    }
+    
+    // Pattern 2: If not found via src, try to locate eval block and extract
+    if (urls.length === 0) {
+      // Look for eval(function pattern
+      var evalMatch = html.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)([\s\S]{0,50000}?)\}\s*\(/);
+      
+      if (evalMatch) {
+        var evalContent = evalMatch[1];
+        // Extract src patterns from packed code
+        var innerSrcPattern = /src["\']?\s*:\s*["\']([^"']*vidzy[^"']*master\.m3u8[^"']*)/g;
+        while ((match = innerSrcPattern.exec(evalContent)) !== null) {
+          if (match[1]) {
+            urls.push(match[1]);
+          }
+        }
+      }
+    }
+    
+    // Cleanup URLs - remove extra quotes/escapes
+    urls = urls.map(function(url) {
+      return url.replace(/[\\"']/g, '').trim();
+    });
+    
+    if (DEBUG) {
+      // Log: Found vidzy URLs in eval code: urls.length
+    }
+    
+    return urls;
+  } catch (e) {
+    if (DEBUG) {
+      // Log: Error extracting URLs from eval: e.toString()
+    }
+    return [];
+  }
+}
+
+// ============================================================================= 
+// HELPER: String Similarity Matching (for LẦN 2: Title Matching)
+// =============================================================================
+
+function calculateSimilarity(str1, str2) {
+  // Simple similarity score 0.0-1.0 (Jaccard + case-insensitive)
+  // Used to find best-matching movie from search results
+  try {
+    var s1 = str1.toLowerCase().trim();
+    var s2 = str2.toLowerCase().trim();
+    
+    if (s1 === s2) return 1.0;  // Perfect match
+    
+    // Split into words
+    var words1 = s1.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(function(w) { return w.length > 0; });
+    var words2 = s2.replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(function(w) { return w.length > 0; });
+    
+    // Calculate Jaccard similarity
+    var intersection = 0;
+    var union = {};
+    
+    for (var i = 0; i < words1.length; i++) {
+      union[words1[i]] = true;
+    }
+    for (var j = 0; j < words2.length; j++) {
+      union[words2[j]] = true;
+      if (words1.indexOf(words2[j]) !== -1) {
+        intersection++;
+      }
+    }
+    
+    var unionSize = Object.keys(union).length;
+    var score = unionSize > 0 ? intersection / unionSize : 0;
+    
+    return score;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function parseDetailResponse(html, originalTitle) {
+  // ============================================================================
+  // CALL 2️⃣: FIND MATCHING MOVIE ON FRENCH-STREAM
+  // ============================================================================
+  // Input: HTML from French-Stream search page + originalTitle from TMDB
+  // Output: URL of best-matching movie for fetching details
+  // 
+  // Strategy:
+  // 1. Extract all search results from HTML
+  // 2. Compare title of each result with originalTitle (using calculateSimilarity)
+  // 3. Select result with highest match score
+  // 4. Return movie detail URL (for CALL 3: parseEmbedResponse to extract video)
+  
+  try {
+    // Use LAST_SEARCH_TITLE if originalTitle not provided
+    var titleForMatching = originalTitle || LAST_SEARCH_TITLE;
+    
+    if (DEBUG) {
+      // Log: [CALL 2] Starting title matching with: titleForMatching
+    }
+    
+    // Extract all .short elements (movie results)
     // Pattern: <div class="short">...<a class="short-poster" href="...">...</a>...<p class="short-title">Title</p>...</div>
     var shortPattern = /<div\s+class="short"[^>]*>([\s\S]*?)<\/div>/g;
     var shortMatches;
@@ -494,20 +623,44 @@ function parseDetailResponse(html) {
     }
     
     if (DEBUG) {
-      // Log search results count
+      // Log: [CALL 2] Found items.length search results
     }
     
-    // If we found items, return first one with isEmbed: true to fetch its detail
+    // MATCHING: Compare titles and select best match
     if (items.length > 0) {
-      var firstItem = items[0];
+      var bestMatch = items[0];
+      var bestScore = 0;
+      
+      // If titleForMatching exists, use it for matching
+      if (titleForMatching && titleForMatching.length > 0) {
+        for (var i = 0; i < items.length; i++) {
+          var score = calculateSimilarity(titleForMatching, items[i].title);
+          if (DEBUG) {
+            // Log: items[i].title " -> similarity score: " + score
+          }
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = items[i];
+          }
+        }
+      }
+      
+      if (DEBUG) {
+        // Log: [CALL 2] Selected best match: bestMatch.title (score: bestScore.toFixed(2))
+      }
+      
+      // Clear LAST_SEARCH_TITLE after use
+      LAST_SEARCH_TITLE = "";
+      
       return JSON.stringify({
-        url: firstItem.href,
-        isEmbed: true,  // Fetch this URL and parse with parseEmbedResponse
+        url: bestMatch.href,
+        isEmbed: true,  // Fetch this URL and parse with parseEmbedResponse (CALL 3)
         headers: { "Referer": FRENCH_STREAM_DOMAIN }
       });
     }
     
     // No items found
+    LAST_SEARCH_TITLE = "";
     return JSON.stringify({
       url: "",
       headers: { "Referer": FRENCH_STREAM_DOMAIN },
@@ -515,8 +668,9 @@ function parseDetailResponse(html) {
     });
   } catch (e) {
     if (DEBUG) {
-      // Log error
+      // Log: [CALL 2] Error in parseDetailResponse
     }
+    LAST_SEARCH_TITLE = "";
     return JSON.stringify({
       url: "",
       headers: { "Referer": FRENCH_STREAM_DOMAIN },
@@ -526,15 +680,52 @@ function parseDetailResponse(html) {
 }
 
 function parseEmbedResponse(html, sourceUrl) {
-  // Receives HTML from various video hosting pages
-  // Extract video stream link from page
+  // ============================================================================
+  // CALL 3️⃣: EXTRACT VIDEO LINK FROM MOVIE DETAIL PAGE
+  // ============================================================================
+  // Input: HTML from movie detail page on French-Stream
+  // Output: Video URL + headers for app playback
+  //
+  // Strategy:
+  // 1. Search all regex patterns to find video link
+  // 2. Priority: Vidzy HLS > iframe > <source> > Direct URL
+  // 3. Extract headers: Referer, Origin, User-Agent
+  // 4. Return URL + headers + mimeType
+  
   try {
+    // Pattern -1: Try to extract from eval(function(p,a,c,k,e,d){...}) packed code FIRST
+    // This handles videojs player code with src embedded in HTML
+    if (DEBUG) {
+      // Log: [CALL 3] Starting embed response parsing, checking for eval code
+    }
+    
+    var extractedUrls = extractUrlsFromEvalCode(html);
+    if (extractedUrls && extractedUrls.length > 0) {
+      if (DEBUG) {
+        // Log: [CALL 3] Found URL in eval code: extractedUrls[0]
+      }
+      return JSON.stringify({
+        url: extractedUrls[0],
+        headers: { 
+          "Referer": sourceUrl,
+          "Origin": "https://vidzy.live",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
+        isEmbed: false,
+        mimeType: "application/x-mpegURL"
+      });
+    }
+    
+    if (DEBUG) {
+      // Log: [CALL 3] No URL in eval code, trying direct patterns
+    }
+    
     // Pattern 0: Vidzy.live HLS master playlist (priority)
     // Looks for: https://u14.vidzy.live/hls2/.../master.m3u8?...
     var vidzyMatch = html.match(/(https:\/\/u\d+\.vidzy\.live\/hls2\/[^"'\s]+master\.m3u8[^"'\s]*)/);
     if (vidzyMatch && vidzyMatch[1]) {
       if (DEBUG) {
-        // Log: Found Vidzy HLS URL
+        // Log: [CALL 3] Found Vidzy HLS URL (direct pattern)
       }
       return JSON.stringify({
         url: vidzyMatch[1],
@@ -557,7 +748,7 @@ function parseEmbedResponse(html, sourceUrl) {
       // For now, return it with isEmbed: true to fetch again
       if (iframeUrl.indexOf(sourceUrl) === -1) {
         if (DEBUG) {
-          // Log: Found iframe URL
+          // Log: [CALL 3] Found iframe URL (embedded player)
         }
         return JSON.stringify({
           url: iframeUrl,
@@ -572,7 +763,7 @@ function parseEmbedResponse(html, sourceUrl) {
     var sourceMatch = html.match(/\<source[^>]*src=["']([^"']+\.m3u8[^"']*)/);
     if (sourceMatch && sourceMatch[1]) {
       if (DEBUG) {
-        // Log: Found source tag m3u8
+        // Log: [CALL 3] Found source tag m3u8
       }
       return JSON.stringify({
         url: sourceMatch[1],
@@ -589,7 +780,7 @@ function parseEmbedResponse(html, sourceUrl) {
       var isHls = videoUrl.indexOf(".m3u8") !== -1;
       
       if (DEBUG) {
-        // Log: Found direct video URL
+        // Log: [CALL 3] Found direct video URL (Pattern 2)
       }
       return JSON.stringify({
         url: videoUrl,
@@ -606,7 +797,7 @@ function parseEmbedResponse(html, sourceUrl) {
       var isHls2 = playerUrl.indexOf(".m3u8") !== -1;
       
       if (DEBUG) {
-        // Log: Found player file URL
+        // Log: [CALL 3] Found player data file URL (Pattern 3)
       }
       return JSON.stringify({
         url: playerUrl,
@@ -617,7 +808,7 @@ function parseEmbedResponse(html, sourceUrl) {
     }
     
     if (DEBUG) {
-      // Log: no video found
+      // Log: [CALL 3] No video URL found - returning empty
     }
     
     return JSON.stringify({
@@ -627,7 +818,7 @@ function parseEmbedResponse(html, sourceUrl) {
     });
   } catch (e) {
     if (DEBUG) {
-      // Log error
+      // Log: [CALL 3] Error parsing embed response: e.toString()
     }
     return JSON.stringify({
       url: "",
