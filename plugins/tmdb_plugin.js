@@ -13,6 +13,7 @@ var VIDSRC_DOMAIN = "https://vidsrc.net";
 var FRENCH_STREAM_DOMAIN = "https://french-stream.one";
 var FRENCH_STREAM_COOKIE = "";
 var FRENCH_STREAM_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+var HLS_MIME_TYPE = "application/x-mpegURL";
 var DEBUG = false;
 var _LAST_FRENCH_META = null;
 var _LAST_FRENCH_SEARCH_URL = "";
@@ -28,7 +29,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "tmdb_xpass",
         "name": "Phim TMDB Cao Cấp",
-        "version": "1.4.0",
+        "version": "1.4.1",
         "baseUrl": BASE_URL,
         "type": "video",
         "author": "Antigravity",
@@ -283,7 +284,7 @@ function parseDetailResponse(html, sourceUrl) {
         return JSON.stringify({ 
             // Trả về url playlist.json, VAAPP sẽ tiếp tục Fetch đệ quy cái url này qua parseEmbedResponse
             url: playlistUrl, 
-            headers: buildXpassHeaders(requestUrl),
+            headers: buildXpassHeaders("https://play.xpass.top/"),
             isEmbed: true 
         });
     }
@@ -322,6 +323,7 @@ function parseDetailResponse(html, sourceUrl) {
             debugLog("[FrenchStream] fallback to xpass:", fallbackUrl);
             return JSON.stringify({
                 url: fallbackUrl,
+                headers: buildXpassHeaders(fallbackUrl),
                 isEmbed: true
             });
         }
@@ -332,6 +334,20 @@ function parseDetailResponse(html, sourceUrl) {
 
 function parseEmbedResponse(html, url) { 
     // Giai đoạn: Nhận HTML (hoặc JSON) từ nguồn chi tiết
+
+    var rawHtml = String(html || "");
+
+    // Một số runtime app có thể đưa thẳng nội dung m3u8 vào parseEmbedResponse.
+    // Trường hợp này trả lại chính URL đã fetch để player phát trực tiếp.
+    if (rawHtml.indexOf("#EXTM3U") !== -1 && url) {
+        return JSON.stringify({
+            url: url,
+            headers: guessStreamHeaders(url),
+            mimeType: HLS_MIME_TYPE,
+            subtitles: [],
+            isEmbed: false
+        });
+    }
 
     // 1. Nếu là nguồn Ophim fallback (Ophim detail JSON)
     if (url && url.indexOf("ophim1.com/v1/api/phim/") !== -1) {
@@ -365,6 +381,7 @@ function parseEmbedResponse(html, url) {
             return JSON.stringify({
                 url: streamUrl,
                 headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://ophim1.com" },
+                mimeType: isLikelyHlsUrl(streamUrl) ? HLS_MIME_TYPE : "",
                 subtitles: [],
                 isEmbed: false
             });
@@ -439,7 +456,7 @@ function parseEmbedResponse(html, url) {
                         "User-Agent": FRENCH_STREAM_USER_AGENT,
                         "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
                     },
-                    mimeType: "application/vnd.apple.mpegurl",
+                    mimeType: HLS_MIME_TYPE,
                     subtitles: [],
                     isEmbed: false
                 });
@@ -460,8 +477,8 @@ function parseEmbedResponse(html, url) {
                 // M3U8 CHUẨN! Trả về cho Native Video Player
                 return JSON.stringify({ 
                     url: streamUrl, 
-                    headers: buildXpassHeaders(url),
-                    mimeType: "application/vnd.apple.mpegurl",
+                    headers: buildXpassHeaders("https://play.xpass.top/"),
+                    mimeType: HLS_MIME_TYPE,
                     subtitles: [],
                     isEmbed: false 
                 }); 
@@ -541,12 +558,16 @@ function parseFrenchMetaFromUrl(url) {
 
 function buildFrenchHeaders(urlRequest) {
     var referer = String(urlRequest || FRENCH_STREAM_DOMAIN + "/");
+    if (referer.indexOf(FRENCH_STREAM_DOMAIN) !== 0) {
+        referer = FRENCH_STREAM_DOMAIN + "/";
+    }
     var origin = getUrlOrigin(referer) || FRENCH_STREAM_DOMAIN;
     var headers = {
         "Referer": referer,
         "Origin": origin,
         "User-Agent": FRENCH_STREAM_USER_AGENT,
-        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "*/*"
     };
 
     if (FRENCH_STREAM_COOKIE) {
@@ -561,13 +582,44 @@ function buildXpassHeaders(refererUrl) {
     if (!/^https?:\/\//i.test(referer)) {
         referer = "https://play.xpass.top/";
     }
+    if (referer.indexOf("play.xpass.top") === -1) {
+        referer = "https://play.xpass.top/";
+    }
+    if (referer.indexOf("/mdata/") !== -1 || referer.indexOf("/mvid/") !== -1 || referer.indexOf("/playlist") !== -1) {
+        referer = "https://play.xpass.top/";
+    }
 
     return {
         "Referer": referer,
         "Origin": "https://play.xpass.top",
         "User-Agent": FRENCH_STREAM_USER_AGENT,
-        "Accept-Language": "en-US,en;q=0.9"
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*"
     };
+}
+
+function guessStreamHeaders(streamUrl) {
+    var url = String(streamUrl || "");
+    if (!url) return {};
+
+    if (/play\.xpass\.top|trovianaworks\.online/i.test(url)) {
+        return buildXpassHeaders("https://play.xpass.top/");
+    }
+
+    var origin = getUrlOrigin(url);
+    if (!origin) return {};
+
+    return {
+        "Referer": origin + "/",
+        "Origin": origin,
+        "User-Agent": FRENCH_STREAM_USER_AGENT,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*"
+    };
+}
+
+function isLikelyHlsUrl(url) {
+    return /\.m3u8(\?|$)/i.test(String(url || ""));
 }
 
 function getUrlOrigin(url) {
@@ -630,14 +682,14 @@ function isFrenchSearchBlocked(html) {
         /just a moment/i.test(source);
 }
 
-    function isLikelyFrenchSearchResponse(html) {
-        var source = String(html || "");
-        if (!source) return false;
+function isLikelyFrenchSearchResponse(html) {
+    var source = String(html || "");
+    if (!source) return false;
 
-        return /short-poster/i.test(source) ||
+    return /short-poster/i.test(source) ||
         /short-title/i.test(source) ||
         /<title>\s*Chargement en cours\s*<\/title>/i.test(source);
-    }
+}
 
 function buildFrenchFallbackUrl(meta) {
     var safeMeta = meta || {};
